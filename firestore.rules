@@ -1,0 +1,47 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.email == 'connection.titascht@gmail.com';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Channels
+    match /channels/{channelId} {
+      allow read: if true; // Everyone can read channels
+      allow create, update: if isAdmin() && isValidId(channelId) && isValidChannel(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    function isValidChannel(data) {
+      return data.keys().hasAll(['name', 'url', 'order'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 100
+        && data.url is string && data.url.size() > 0 && data.url.size() <= 500
+        && data.order is number
+        && (!('logo' in data) || (data.logo is string && data.logo.size() <= 500));
+    }
+
+    // Configs
+    match /configs/{configId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}

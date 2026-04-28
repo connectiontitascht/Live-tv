@@ -1,0 +1,57 @@
+{
+  "entities": {
+    "channel": {
+      "title": "Channel",
+      "description": "A TV channel available for streaming",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Name of the channel"
+        },
+        "url": {
+          "type": "string",
+          "description": "M3U8 streaming URL"
+        },
+        "logo": {
+          "type": "string",
+          "description": "URL to the channel logo"
+        },
+        "order": {
+          "type": "number",
+          "description": "Display order of the channel"
+        }
+      },
+      "required": ["name", "url", "order"]
+    },
+    "config": {
+      "title": "Config",
+      "description": "Global application configuration",
+      "type": "object",
+      "properties": {
+        "initialAdDuration": {
+          "type": "number",
+          "description": "Duration of the initial ad in seconds"
+        },
+        "hourlyAdInterval": {
+          "type": "number",
+          "description": "Interval for recurring ads in seconds"
+        },
+        "adVideoUrl": {
+          "type": "string",
+          "description": "URL of the advertisement video"
+        }
+      }
+    }
+  },
+  "firestore": {
+    "/channels/{channelId}": {
+      "schema": "channel",
+      "description": "List of available TV channels"
+    },
+    "/configs/global": {
+      "schema": "config",
+      "description": "Global settings for the app"
+    }
+  }
+}
