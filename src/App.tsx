@@ -1,65 +1,54 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { db, auth, googleProvider, handleFirestoreError, OperationType, isFirebaseConfigured } from './lib/firebase';
+import { db, auth, googleProvider, handleFirestoreError, OperationType } from './lib/firebase';
 import { collection, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { signInWithPopup, signOut, onAuthStateChanged } from 'firebase/auth';
 import { Channel, AppConfig } from './types';
-import { MOCK_CHANNELS, DEFAULT_CONFIG } from './constants';
 import VideoPlayer from './components/VideoPlayer';
 import ChannelList from './components/ChannelList';
 import AdminPanel from './components/AdminPanel';
-import { User, LogOut, Settings, Tv, Terminal, AlertTriangle } from 'lucide-react';
+import { User, LogOut, Settings, Tv, Terminal } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const ADMIN_EMAIL = 'connection.titascht@gmail.com';
 
 export default function App() {
-  const [channels, setChannels] = useState<Channel[]>(isFirebaseConfigured ? [] : MOCK_CHANNELS);
-  const [config, setConfig] = useState<AppConfig | null>(isFirebaseConfigured ? null : DEFAULT_CONFIG);
-  const [currentChannel, setCurrentChannel] = useState<Channel | null>(isFirebaseConfigured ? null : MOCK_CHANNELS[0]);
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [config, setConfig] = useState<AppConfig | null>(null);
+  const [currentChannel, setCurrentChannel] = useState<Channel | null>(null);
   const [search, setSearch] = useState('');
   const [isAdMode, setIsAdMode] = useState(false);
   const [user, setUser] = useState<any>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
-  const [loading, setLoading] = useState(isFirebaseConfigured);
+  const [loading, setLoading] = useState(true);
 
   // Fetch Channels
   useEffect(() => {
-    if (!isFirebaseConfigured) return;
-
     const unsub = onSnapshot(collection(db, 'channels'), (snap) => {
       const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Channel));
-      setChannels(data.length > 0 ? data.sort((a, b) => a.order - b.order) : MOCK_CHANNELS);
-      
+      setChannels(data.sort((a, b) => a.order - b.order));
       if (data.length > 0 && !currentChannel) {
+        // Initial setup
         setCurrentChannel(data.sort((a, b) => a.order - b.order)[0]);
+        // Trigger initial ad if configured
         triggerInitialAd();
       }
       setLoading(false);
-    }, (err) => {
-      handleFirestoreError(err, OperationType.LIST, 'channels');
-      setChannels(MOCK_CHANNELS);
-      setLoading(false);
-    });
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'channels'));
 
     return () => unsub();
   }, [currentChannel]);
 
   // Fetch Config
   useEffect(() => {
-    if (!isFirebaseConfigured) return;
-
     const fetchConfig = async () => {
       try {
         const snap = await getDoc(doc(db, 'configs', 'global'));
         if (snap.exists()) {
           setConfig(snap.data() as AppConfig);
-        } else {
-          setConfig(DEFAULT_CONFIG);
         }
       } catch (err) {
         console.error("Failed to fetch config", err);
-        setConfig(DEFAULT_CONFIG);
       }
     };
     fetchConfig();
@@ -144,12 +133,6 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-4">
-          {!isFirebaseConfigured && (
-            <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-yellow-500/10 border border-yellow-500/20 rounded-full text-yellow-500 text-xs font-medium">
-              <AlertTriangle size={14} />
-              <span>Preview Mode (No Firebase)</span>
-            </div>
-          )}
           {isAdmin && (
             <button
               onClick={() => setShowAdmin(!showAdmin)}

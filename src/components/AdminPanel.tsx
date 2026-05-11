@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { db, handleFirestoreError, OperationType, isFirebaseConfigured } from '../lib/firebase';
+import { db, storage, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Channel, AppConfig } from '../types';
-import { Plus, Trash2, Edit2, X, Save, Settings, AlertCircle } from 'lucide-react';
+import { Plus, Trash2, Edit2, X, Save, Settings, Tv, Upload, Loader2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface AdminPanelProps {
@@ -17,13 +18,28 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
   const [formData, setFormData] = useState<Partial<Channel>>({ name: '', url: '', logo: '', order: 0 });
   const [configData, setConfigData] = useState<AppConfig>(config || { initialAdDuration: 10, hourlyAdInterval: 3600, adVideoUrl: '' });
   const [view, setView] = useState<'channels' | 'settings'>('channels');
+  const [uploading, setUploading] = useState(false);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    try {
+      const storageRef = ref(storage, `logos/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      setFormData({ ...formData, logo: url });
+    } catch (err) {
+      console.error("Upload failed", err);
+      alert("Logo upload failed. Please check your storage rules.");
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isFirebaseConfigured) {
-      alert('Firebase is not configured. Saving is disabled in preview mode.');
-      return;
-    }
     try {
       if (isEditing) {
         const channelRef = doc(db, 'channels', isEditing);
@@ -39,7 +55,6 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
   };
 
   const handleDelete = async (id: string) => {
-    if (!isFirebaseConfigured) return;
     if (!confirm('Are you sure you want to delete this channel?')) return;
     try {
       await deleteDoc(doc(db, 'channels', id));
@@ -50,10 +65,6 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
   };
 
   const handleSaveConfig = async () => {
-    if (!isFirebaseConfigured) {
-      alert('Firebase is not configured. Saving is disabled in preview mode.');
-      return;
-    }
     try {
       await setDoc(doc(db, 'configs', 'global'), configData);
       onRefresh();
@@ -77,16 +88,6 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
 
   return (
     <div className="bg-[#1A1A1A] rounded-2xl p-6 border border-white/5 text-white shadow-xl">
-      {!isFirebaseConfigured && (
-        <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-xl flex items-start gap-3 text-yellow-500">
-          <AlertCircle className="shrink-0 mt-0.5" size={20} />
-          <div>
-            <div className="font-bold">Firebase Not Configured</div>
-            <p className="text-sm opacity-80">You are currently in Preview Mode. Changes made here will not be saved to a database. To enable live data and remote management, please set up Firebase using the tool.</p>
-          </div>
-        </div>
-      )}
-
       <div className="flex items-center justify-between mb-8">
         <h2 className="text-2xl font-bold flex items-center gap-2">
           <Settings className="text-blue-500" />
@@ -126,8 +127,8 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
             {channels.sort((a, b) => a.order - b.order).map((channel) => (
               <div key={channel.id} className="flex items-center justify-between p-4 bg-white/5 rounded-xl border border-white/5 hover:border-white/10 transition-colors group">
                 <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 bg-black rounded flex items-center justify-center overflow-hidden">
-                    {channel.logo ? <img src={channel.logo} className="w-full h-full object-contain" /> : <Save size={16} />}
+                  <div className="w-10 h-10 bg-black rounded flex items-center justify-center overflow-hidden border border-white/5">
+                    {channel.logo ? <img src={channel.logo} alt={channel.name} className="w-full h-full object-contain p-1" /> : <Tv size={20} className="opacity-20" />}
                   </div>
                   <div>
                     <div className="font-medium">{channel.name}</div>
@@ -213,7 +214,7 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
                   <input
                     required
                     type="text"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   />
@@ -223,19 +224,35 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
                   <input
                     required
                     type="text"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
                     value={formData.url}
                     onChange={(e) => setFormData({ ...formData, url: e.target.value })}
                   />
                 </div>
-                <div>
-                  <label className="block text-sm text-white/40 mb-1">লোগো URL (ঐচ্ছিক)</label>
-                  <input
-                    type="text"
-                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3"
-                    value={formData.logo}
-                    onChange={(e) => setFormData({ ...formData, logo: e.target.value })}
-                  />
+                <div className="grid grid-cols-[1fr_auto] gap-4 items-end">
+                  <div className="flex-1 space-y-2">
+                    <label className="block text-sm text-white/40 mb-1">লোগো (URL বা আপলোড)</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                        value={formData.logo}
+                        onChange={(e) => setFormData({ ...formData, logo: e.target.value })}
+                        placeholder="https://..."
+                      />
+                      <label className="bg-white/10 hover:bg-white/20 p-3 rounded-xl cursor-pointer transition-colors shrink-0">
+                        <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} disabled={uploading} />
+                        {uploading ? <Loader2 size={24} className="animate-spin text-blue-400" /> : <Upload size={24} />}
+                      </label>
+                    </div>
+                  </div>
+                  <div className="w-12 h-12 bg-black rounded-xl border border-white/10 flex items-center justify-center overflow-hidden shrink-0">
+                    {formData.logo ? (
+                      <img src={formData.logo} alt="Preview" className="w-full h-full object-contain p-1" />
+                    ) : (
+                      <Tv size={24} className="opacity-20" />
+                    )}
+                  </div>
                 </div>
                 <div>
                   <label className="block text-sm text-white/40 mb-1">সিরিয়াল নম্বর</label>

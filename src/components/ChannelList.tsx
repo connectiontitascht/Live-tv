@@ -11,6 +11,25 @@ interface ChannelListProps {
   onSearchChange: (val: string) => void;
 }
 
+const ChannelLogo = ({ src, name, isSelected }: { src?: string; name: string; isSelected: boolean }) => {
+  const [error, setError] = React.useState(false);
+
+  return (
+    <div className={`w-10 h-10 rounded-lg overflow-hidden shrink-0 flex items-center justify-center bg-black/40 border ${isSelected ? 'border-white/20' : 'border-white/5'}`}>
+      {src && !error ? (
+        <img 
+          src={src} 
+          alt={name} 
+          className="w-full h-full object-contain p-1"
+          onError={() => setError(true)}
+        />
+      ) : (
+        <Tv size={20} className="opacity-40" />
+      )}
+    </div>
+  );
+};
+
 export default function ChannelList({ channels, selectedId, onSelect, search, onSearchChange }: ChannelListProps) {
   const filteredChannels = channels.filter(c => 
     c.name.toLowerCase().includes(search.toLowerCase())
@@ -36,27 +55,38 @@ export default function ChannelList({ channels, selectedId, onSelect, search, on
         {filteredChannels.length > 0 ? (
           filteredChannels.map((channel, index) => (
             <motion.button
-              key={channel.id}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: index * 0.02 }}
-              onClick={() => onSelect(channel)}
-              className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200 group ${
-                selectedId === channel.id 
-                  ? 'bg-blue-600 text-white' 
-                  : 'text-white/60 hover:bg-white/5 hover:text-white'
-              }`}
-              id={`channel-${channel.id}`}
-            >
-              <div className={`w-10 h-10 rounded-lg overflow-hidden shrink-0 flex items-center justify-center bg-black/40 border ${selectedId === channel.id ? 'border-white/20' : 'border-white/5'}`}>
-                {channel.logo ? (
-                  <img src={channel.logo} alt={channel.name} className="w-full h-full object-contain p-1" />
-                ) : (
-                  <Tv size={20} className="opacity-40" />
-                )}
-              </div>
-              <div className="flex-1 text-left">
+               key={channel.id}
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               transition={{ delay: index * 0.02 }}
+               onClick={() => onSelect(channel)}
+               className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition-all duration-200 group ${
+                 selectedId === channel.id 
+                   ? 'bg-blue-600 text-white' 
+                   : 'text-white/60 hover:bg-white/5 hover:text-white'
+               }`}
+               id={`channel-${channel.id}`}
+             >
+               <ChannelLogo 
+                 src={channel.logo} 
+                 name={channel.name} 
+                 isSelected={selectedId === channel.id} 
+               />
+               <div className="flex-1 text-left flex items-center justify-between gap-2">
                 <span className="block font-medium text-xs line-clamp-1">{channel.name}</span>
+                {selectedId === channel.id && (
+                  <motion.div
+                    initial={{ scale: 0.8, opacity: 0.5 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{
+                      repeat: Infinity,
+                      repeatType: "reverse",
+                      duration: 0.8,
+                    }}
+                    className="w-2 h-2 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.6)] shrink-0"
+                    id="playing-indicator"
+                  />
+                )}
               </div>
             </motion.button>
           ))
