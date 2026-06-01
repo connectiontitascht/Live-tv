@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { db, storage, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Channel, AppConfig } from '../types';
-import { Plus, Trash2, Edit2, X, Save, Settings, Tv, Upload, Loader2 } from 'lucide-react';
+import { Plus, Trash2, Edit2, X, Save, Settings, Tv, Upload, Loader2, ShieldAlert } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface AdminPanelProps {
@@ -16,15 +16,87 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState<Partial<Channel>>({ name: '', url: '', logo: '', order: 0 });
-  const [configData, setConfigData] = useState<AppConfig>(config || { initialAdDuration: 10, hourlyAdInterval: 3600, adVideoUrl: '' });
+  const [configData, setConfigData] = useState<AppConfig>(config || { initialAdDuration: 10, hourlyAdInterval: 3600, adVideoUrl: '', adType: 'video', adImageUrl: '', adLinkUrl: '' });
   const [view, setView] = useState<'channels' | 'settings'>('channels');
   const [uploading, setUploading] = useState(false);
+  const [adUploading, setAdUploading] = useState(false);
+  const [adImageUploading, setAdImageUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (config) {
+      setConfigData(config);
+    }
+  }, [config]);
+
+  const handleAdImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      setSettingsError("অনুগ্রহ করে একটি সঠিক ছবি ফাইল (.png, .jpg, .jpeg, .webp ইত্যাদি) নির্বাচন করুন।");
+      return;
+    }
+
+    setAdImageUploading(true);
+    setSettingsError(null);
+    setSettingsSuccess(null);
+    try {
+      const storageRef = ref(storage, `ad_images/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      setConfigData((prev) => ({ ...prev, adImageUrl: url }));
+      setSettingsSuccess("অ্যাড ফটো ফাইল সফলভাবে আপলোড হয়েছে!");
+    } catch (err: any) {
+      console.error("Ad image upload failed", err);
+      let errMsg = "অ্যাড ফটো আপলোড ব্যর্থ হয়েছে। অনুগ্রহ করে স্টোরেজ রুলস চেক করুন।";
+      if (err.message && (err.message.includes('permission-denied') || err.message.includes('Permission denied') || err.message.includes('insufficient permissions'))) {
+        errMsg = "অ্যাড ফটো আপলোড করার অনুমতি নেই। অনুগ্রহ করে নিশ্চিত করুন যে আপনি এডমিন ইমেইল দিয়ে লগইন করেছেন।";
+      }
+      setSettingsError(errMsg);
+    } finally {
+      setAdImageUploading(false);
+    }
+  };
+
+  const handleAdFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('video/')) {
+      setSettingsError("অনুগ্রহ করে একটি সঠিক ভিডিও ফাইল (.mp4, .mov ইত্যাদি) নির্বাচন করুন।");
+      return;
+    }
+
+    setAdUploading(true);
+    setSettingsError(null);
+    setSettingsSuccess(null);
+    try {
+      const storageRef = ref(storage, `ads/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      setConfigData((prev) => ({ ...prev, adVideoUrl: url }));
+      setSettingsSuccess("অ্যাড ভিডিও ফাইল সফলভাবে আপলোড হয়েছে!");
+    } catch (err: any) {
+      console.error("Ad video upload failed", err);
+      let errMsg = "অ্যাড ভিডিও আপলোড ব্যর্থ হয়েছে। অনুগ্রহ করে স্টোরেজ রুলস চেক করুন।";
+      if (err.message && (err.message.includes('permission-denied') || err.message.includes('Permission denied') || err.message.includes('insufficient permissions'))) {
+        errMsg = "অ্যাড ভিডিও আপলোড করার অনুমতি নেই। অনুগ্রহ করে নিশ্চিত করুন যে আপনি এডমিন ইমেইল দিয়ে লগইন করেছেন।";
+      }
+      setSettingsError(errMsg);
+    } finally {
+      setAdUploading(false);
+    }
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setUploading(true);
+    setError(null);
     try {
       const storageRef = ref(storage, `logos/${Date.now()}_${file.name}`);
       await uploadBytes(storageRef, file);
@@ -32,7 +104,7 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
       setFormData({ ...formData, logo: url });
     } catch (err) {
       console.error("Upload failed", err);
-      alert("Logo upload failed. Please check your storage rules.");
+      setError("Logo upload failed. Please check your storage rules.");
     } finally {
       setUploading(false);
     }
@@ -40,17 +112,37 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setError(null);
     try {
+      const cleanData = {
+        name: (formData.name || '').trim(),
+        url: (formData.url || '').trim(),
+        logo: (formData.logo || '').trim(),
+        order: typeof formData.order === 'number' && !isNaN(formData.order) ? formData.order : channels.length,
+      };
+
+      if (!cleanData.name) {
+        throw new Error('চ্যানেলের নাম অবশ্যই দিতে হবে।');
+      }
+      if (!cleanData.url) {
+        throw new Error('চ্যানেলের স্ট্রিমিং URL অবশ্যই দিতে হবে।');
+      }
+
       if (isEditing) {
         const channelRef = doc(db, 'channels', isEditing);
-        await updateDoc(channelRef, { ...formData });
+        await updateDoc(channelRef, cleanData);
       } else {
-        await addDoc(collection(db, 'channels'), { ...formData, order: channels.length });
+        await addDoc(collection(db, 'channels'), cleanData);
       }
       resetForm();
       onRefresh();
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'channels');
+    } catch (err: any) {
+      console.error("Submit error", err);
+      let errMsg = err.message || 'চ্যানেল সংরক্ষণ করতে ব্যর্থ হয়েছে।';
+      if (errMsg.includes('permission-denied') || errMsg.includes('Permission denied') || errMsg.includes('insufficient permissions')) {
+        errMsg = 'চ্যানেল সংরক্ষণ করার অনুমতি নেই। অনুগ্রহ করে নিশ্চিত করুন যে আপনি এডমিন ইমেইল (connection.titascht@gmail.com) দিয়ে লগইন করেছেন।';
+      }
+      setError(errMsg);
     }
   };
 
@@ -65,24 +157,33 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
   };
 
   const handleSaveConfig = async () => {
+    setSettingsError(null);
+    setSettingsSuccess(null);
     try {
       await setDoc(doc(db, 'configs', 'global'), configData);
       onRefresh();
-      alert('Settings saved!');
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'configs/global');
+      setSettingsSuccess('গ্লোবাল সেটিংস সফলভাবে সংরক্ষিত হয়েছে!');
+    } catch (err: any) {
+      console.error("Save config failed", err);
+      let errMsg = 'সেটিংস সংরক্ষণ করতে ব্যর্থ হয়েছে।';
+      if (err.message && (err.message.includes('permission-denied') || err.message.includes('Permission denied') || err.message.includes('insufficient permissions'))) {
+        errMsg = "সেটিংস সংরক্ষণ করার অনুমতি নেই। অনুগ্রহ করে নিশ্চিত করুন যে আপনি এডমিন ইমেইল দিয়ে লগইন করেছেন।";
+      }
+      setSettingsError(errMsg);
     }
   };
 
   const resetForm = () => {
     setIsEditing(null);
     setShowAddForm(false);
+    setError(null);
     setFormData({ name: '', url: '', logo: '', order: channels.length });
   };
 
   const startEdit = (channel: Channel) => {
     setIsEditing(channel.id);
     setFormData(channel);
+    setError(null);
     setShowAddForm(true);
   };
 
@@ -145,38 +246,150 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
         </div>
       ) : (
         <div className="space-y-6 max-w-md mx-auto">
+          {settingsError && (
+            <div className="p-3.5 bg-red-950/40 border border-red-500/20 text-red-300 text-xs rounded-xl flex gap-1.5 items-start">
+              <ShieldAlert size={16} className="shrink-0 mt-0.5 text-red-500" />
+              <span className="leading-relaxed">{settingsError}</span>
+            </div>
+          )}
+          {settingsSuccess && (
+            <div className="p-3.5 bg-emerald-950/40 border border-emerald-500/20 text-emerald-300 text-xs rounded-xl flex gap-1.5 items-start">
+              <span className="shrink-0 mt-0.5 text-emerald-500">✓</span>
+              <span className="leading-relaxed">{settingsSuccess}</span>
+            </div>
+          )}
           <div className="space-y-4">
             <div>
               <label className="block text-sm text-white/40 mb-2">Initial Ad Duration (seconds)</label>
               <input
                 type="number"
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white"
                 value={configData.initialAdDuration}
-                onChange={(e) => setConfigData({ ...configData, initialAdDuration: parseInt(e.target.value) })}
+                onChange={(e) => setConfigData({ ...configData, initialAdDuration: parseInt(e.target.value) || 0 })}
               />
             </div>
             <div>
               <label className="block text-sm text-white/40 mb-2">Hourly Ad Interval (seconds)</label>
               <input
                 type="number"
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white"
                 value={configData.hourlyAdInterval}
-                onChange={(e) => setConfigData({ ...configData, hourlyAdInterval: parseInt(e.target.value) })}
+                onChange={(e) => setConfigData({ ...configData, hourlyAdInterval: parseInt(e.target.value) || 0 })}
               />
             </div>
             <div>
-              <label className="block text-sm text-white/40 mb-2">Ad Overlay Video URL (M3U8/MP4)</label>
-              <input
-                type="text"
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2"
-                value={configData.adVideoUrl}
-                onChange={(e) => setConfigData({ ...configData, adVideoUrl: e.target.value })}
-                placeholder="https://..."
-              />
+              <label className="block text-sm text-white/40 mb-2">বিজ্ঞাপনের ধরন (Ad Type)</label>
+              <div className="grid grid-cols-2 gap-2 p-1 bg-white/5 border border-white/10 rounded-xl">
+                <button
+                  type="button"
+                  onClick={() => setConfigData({ ...configData, adType: 'video' })}
+                  className={`py-2 text-xs font-semibold rounded-lg transition-all ${
+                    (configData.adType === 'video' || !configData.adType)
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-white/60 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  ভিডিও বিজ্ঞাপন (Video Ad)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfigData({ ...configData, adType: 'image' })}
+                  className={`py-2 text-xs font-semibold rounded-lg transition-all ${
+                    configData.adType === 'image'
+                      ? 'bg-blue-600 text-white shadow-md'
+                      : 'text-white/60 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  ছবি বিজ্ঞাপন (Image Ad)
+                </button>
+              </div>
             </div>
+
+            {(configData.adType === 'video' || !configData.adType) ? (
+              <div>
+                <label className="block text-sm text-white/40 mb-2">Ad Overlay Video URL (M3U8/MP4 বা আপলোড)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                    value={configData.adVideoUrl}
+                    onChange={(e) => {
+                      setSettingsError(null);
+                      setSettingsSuccess(null);
+                      setConfigData({ ...configData, adVideoUrl: e.target.value });
+                    }}
+                    placeholder="https://... (M3U8 বা MP4 লিংক)"
+                  />
+                  <label className="bg-white/10 hover:bg-white/20 p-2.5 rounded-xl cursor-pointer transition-colors shrink-0 flex items-center justify-center border border-white/5" title="ভিডিও ফাইল আপলোড করুন">
+                    <input type="file" className="hidden" accept="video/*" onChange={handleAdFileUpload} disabled={adUploading} />
+                    {adUploading ? <Loader2 size={18} className="animate-spin text-blue-400" /> : <Upload size={18} />}
+                  </label>
+                </div>
+                <p className="text-xs text-white/40 mt-1.5 leading-relaxed">
+                  সরাসরি ভিডিওর লিংক দিতে পারেন অথবা ডানদিকের আপলোড আইকনে ক্লিক করে ডিভাইস থেকে যেকোনো অ্যাড ভিডিও (.mp4/etc) সরাসরি আপলোড করতে পারেন।
+                </p>
+                {configData.adVideoUrl && (
+                  <div className="bg-white/5 border border-white/5 rounded-xl p-3.5 mt-3 space-y-1">
+                    <span className="text-xs text-white/40 block">বর্তমান অ্যাড ভিডিও লিংক (Current Ad Video):</span>
+                    <span className="text-xs text-blue-400 font-mono break-all block">{configData.adVideoUrl}</span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm text-white/40 mb-2">Ad Image URL (ফটো লিংক বা আপলোড)</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                      value={configData.adImageUrl || ''}
+                      onChange={(e) => {
+                        setSettingsError(null);
+                        setSettingsSuccess(null);
+                        setConfigData({ ...configData, adImageUrl: e.target.value });
+                      }}
+                      placeholder="https://... (PNG/JPG ছবির লিংক)"
+                    />
+                    <label className="bg-white/10 hover:bg-white/20 p-2.5 rounded-xl cursor-pointer transition-colors shrink-0 flex items-center justify-center border border-white/5" title="বিজ্ঞাপনের ছবি আপলোড করুন">
+                      <input type="file" className="hidden" accept="image/*" onChange={handleAdImageUpload} disabled={adImageUploading} />
+                      {adImageUploading ? <Loader2 size={18} className="animate-spin text-blue-400" /> : <Upload size={18} />}
+                    </label>
+                  </div>
+                  <p className="text-xs text-white/40 mt-1.5 leading-relaxed">
+                    সরাসরি যেকোনো ছবির লিংক দিতে পারেন অথবা ডানদিকের আপলোড আইকনে ক্লিক করে ডিভাইস থেকে বিজ্ঞাপন হিসেবে ছবি আপলোড করতে পারেন।
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm text-white/40 mb-2">বিজ্ঞাপনে ক্লিক করলে যে লিংক ওপেন হবে (Optional Ad Link)</label>
+                  <input
+                    type="text"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all"
+                    value={configData.adLinkUrl || ''}
+                    onChange={(e) => setConfigData({ ...configData, adLinkUrl: e.target.value })}
+                    placeholder="https://mywebsite.com (Optional)"
+                  />
+                  <p className="text-xs text-white/40 mt-1.5 leading-relaxed">
+                    ভিজিটর যখন ছবি বিজ্ঞাপনের উপর ট্যাপ করবে তখন এই লিংকে নিয়ে যাবে।
+                  </p>
+                </div>
+
+                {configData.adImageUrl && (
+                  <div className="bg-white/5 border border-white/5 rounded-xl p-3.5 space-y-2">
+                    <span className="text-xs text-white/40 block">বর্তমান অ্যাড ছবি (Current Ad Image Preview):</span>
+                    <div className="relative aspect-video rounded-lg overflow-hidden bg-black flex items-center justify-center border border-white/10">
+                      <img src={configData.adImageUrl} alt="Ad Preview" className="max-h-full max-w-full object-contain" referrerPolicy="no-referrer" />
+                    </div>
+                    <span className="text-xs text-blue-400 font-mono break-all block">{configData.adImageUrl}</span>
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               onClick={handleSaveConfig}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl transition-all shadow-lg shadow-blue-600/15"
             >
               Save Global Settings
             </button>
@@ -264,6 +477,21 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
                   />
                 </div>
               </div>
+
+              {/* Error Alert */}
+              <AnimatePresence>
+                {error && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -5 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -5 }}
+                    className="mt-4 p-3.5 bg-red-950/40 border border-red-500/20 text-red-300 text-xs rounded-xl flex gap-1.5 items-start"
+                  >
+                    <ShieldAlert size={16} className="shrink-0 mt-0.5 text-red-500" />
+                    <span className="leading-relaxed">{error}</span>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               <div className="mt-8 flex gap-3">
                 <button

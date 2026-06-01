@@ -16,17 +16,20 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isSignedIn() && request.auth.token.email == 'connection.titascht@gmail.com';
+      return isSignedIn() && (
+        request.auth.token.email.lower() == 'connection.titascht@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() <= 128;
     }
 
     // Channels
     match /channels/{channelId} {
       allow read: if true; // Everyone can read channels
-      allow create, update: if isAdmin() && isValidId(channelId) && isValidChannel(request.resource.data);
+      allow create, update: if isAdmin() && isValidChannel(request.resource.data);
       allow delete: if isAdmin();
     }
 

@@ -1,10 +1,10 @@
 {
-  "projectId": "remixed-project-id",
-  "appId": "remixed-app-id",
-  "apiKey": "remixed-api-key",
-  "authDomain": "remixed-auth-domain",
-  "firestoreDatabaseId": "remixed-firestore-database-id",
-  "storageBucket": "remixed-storage-bucket",
-  "messagingSenderId": "remixed-messaging-sender-id",
-  "measurementId": "remixed-measurement-id"
+  "projectId": "versatile-presence-llkqp",
+  "appId": "1:772777184017:web:b845733951b110fdec9ab0",
+  "apiKey": "AIzaSyAOtdOHOHhbaQkRcJcf-r-9rd6ODR8Ljs4",
+  "authDomain": "versatile-presence-llkqp.firebaseapp.com",
+  "firestoreDatabaseId": "ai-studio-c2da2d3e-a2a6-4a9a-82b1-e75bd31cec42",
+  "storageBucket": "versatile-presence-llkqp.firebasestorage.app",
+  "messagingSenderId": "772777184017",
+  "measurementId": ""
 }

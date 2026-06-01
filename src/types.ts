@@ -10,4 +10,7 @@ export interface AppConfig {
   initialAdDuration: number;
   hourlyAdInterval: number;
   adVideoUrl: string;
+  adType?: 'video' | 'image';
+  adImageUrl?: string;
+  adLinkUrl?: string;
 }

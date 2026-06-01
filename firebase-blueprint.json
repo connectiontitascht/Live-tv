@@ -42,6 +42,18 @@
           "description": "URL of the advertisement video"
         }
       }
+    },
+    "admin": {
+      "title": "Admin",
+      "description": "A user with administrative privileges",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Email address of the admin"
+        }
+      },
+      "required": ["email"]
     }
   },
   "firestore": {
@@ -52,6 +64,10 @@
     "/configs/global": {
       "schema": "config",
       "description": "Global settings for the app"
+    },
+    "/admins/{userId}": {
+      "schema": "admin",
+      "description": "Collection of admin users by their UID"
     }
   }
 }
