@@ -12,7 +12,7 @@ export default defineConfig(({mode}) => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+        includeAssets: ['titas_logo.png'],
         manifest: {
           name: 'T-TV Live',
           short_name: 'T-TV',
@@ -22,17 +22,17 @@ export default defineConfig(({mode}) => {
           display: 'standalone',
           icons: [
             {
-              src: 'https://cdn-icons-png.flaticon.com/512/716/716429.png',
+              src: 'titas_logo.png',
               sizes: '192x192',
               type: 'image/png'
             },
             {
-              src: 'https://cdn-icons-png.flaticon.com/512/716/716429.png',
+              src: 'titas_logo.png',
               sizes: '512x512',
               type: 'image/png'
             },
             {
-              src: 'https://cdn-icons-png.flaticon.com/512/716/716429.png',
+              src: 'titas_logo.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any maskable'
@@ -42,7 +42,11 @@ export default defineConfig(({mode}) => {
       })
     ],
     define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
+      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY || ''),
+    },
+    build: {
+      outDir: 'dist',
+      emptyOutDir: true,
     },
     resolve: {
       alias: {

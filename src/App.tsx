@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { db, auth, googleProvider, handleFirestoreError, OperationType } from './lib/firebase';
 import { collection, onSnapshot, doc, getDoc } from 'firebase/firestore';
 import { 
@@ -12,7 +12,7 @@ import { Channel, AppConfig } from './types';
 import VideoPlayer from './components/VideoPlayer';
 import ChannelList from './components/ChannelList';
 import AdminPanel from './components/AdminPanel';
-import { User, LogOut, Settings, Tv, Terminal, Download, Eye, EyeOff, ShieldAlert, X, Power, ChevronUp, ChevronDown } from 'lucide-react';
+import { User, LogOut, Settings, Tv, Terminal, Download, Eye, EyeOff, ShieldAlert, X, Power, ChevronUp, ChevronDown, Maximize2, Play, Keyboard, HelpCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 const ADMIN_EMAIL = 'connection.titascht@gmail.com';
@@ -29,6 +29,11 @@ export default function App() {
   const [showAdmin, setShowAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [isVideoFullscreen, setIsVideoFullscreen] = useState(false);
+  const [isTvMode, setIsTvMode] = useState<boolean>(true);
+  const [tvFocusIndex, setTvFocusIndex] = useState<number>(0);
+  const [showVirtualRemote, setShowVirtualRemote] = useState<boolean>(false);
+  const [showShortcutsModal, setShowShortcutsModal] = useState<boolean>(false);
 
   // Auth modal states
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -163,24 +168,132 @@ export default function App() {
     return () => clearInterval(interval);
   }, [config]);
 
-  // Remote Control Support
+  // Persist TV Mode selection
+  useEffect(() => {
+    localStorage.setItem('isTvMode', String(isTvMode));
+  }, [isTvMode]);
+
+  // Sync tvFocusIndex to selected channel
+  useEffect(() => {
+    if (!channels.length || !currentChannel) return;
+    const currentIndex = channels.findIndex(c => c.id === currentChannel.id);
+    if (currentIndex !== -1) {
+      setTvFocusIndex(currentIndex);
+    }
+  }, [currentChannel, channels]);
+
+  // Remote Control Support for Android TV
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!channels.length) return;
-      const currentIndex = channels.findIndex(c => c.id === currentChannel?.id);
+      // Ignore key events if user is typing in input fields
+      if (
+        document.activeElement?.tagName === 'INPUT' ||
+        document.activeElement?.tagName === 'TEXTAREA'
+      ) {
+        return;
+      }
 
-      if (e.key === 'ArrowDown') {
-        const nextIndex = (currentIndex + 1) % channels.length;
-        setCurrentChannel(channels[nextIndex]);
-      } else if (e.key === 'ArrowUp') {
-        const prevIndex = (currentIndex - 1 + channels.length) % channels.length;
-        setCurrentChannel(channels[prevIndex]);
+      const keyLower = e.key.toLowerCase();
+
+      // Global Shortcut 'H' - Toggle keyboard shortcuts helpful dialog
+      if (keyLower === 'h') {
+        e.preventDefault();
+        setShowShortcutsModal(prev => !prev);
+        return;
+      }
+
+      // Global Shortcut 'T' (Disabled)
+      /*
+      if (keyLower === 't') {
+        e.preventDefault();
+        setIsTvMode(prev => {
+          const nextVal = !prev;
+          if (nextVal) {
+            setShowVirtualRemote(true);
+          } else {
+            setShowVirtualRemote(false);
+          }
+          return nextVal;
+        });
+        return;
+      }
+      */
+
+      // Escape to close open dialogs
+      if (e.key === 'Escape') {
+        setShowShortcutsModal(false);
+      }
+
+      const filteredChannels = channels.filter((c) =>
+        c.name.toLowerCase().includes(search.toLowerCase())
+      );
+
+      if (!filteredChannels.length) return;
+
+      if (isTvMode) {
+        // --- Android TV D-Pad mode ---
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setTvFocusIndex((prev) => (prev + 1) % filteredChannels.length);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setTvFocusIndex((prev) => (prev - 1 + filteredChannels.length) % filteredChannels.length);
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          const targetChannel = filteredChannels[tvFocusIndex];
+          if (targetChannel) {
+            setCurrentChannel(targetChannel);
+            setShowAdmin(false);
+          }
+        } else if (e.key === 'ArrowRight') {
+          // TV D-Pad Right shortcut: Toggle player fullscreen automatically
+          e.preventDefault();
+          const fsBtn = document.getElementById('fullscreen-btn');
+          if (fsBtn) {
+            fsBtn.click();
+          }
+        } else if (e.key === 'ArrowLeft') {
+          // TV D-Pad Left shortcut: Toggle mute/unmute
+          e.preventDefault();
+          const muteBtn = document.getElementById('mute-btn');
+          if (muteBtn) {
+            muteBtn.click();
+          }
+        }
+      } else {
+        // --- Standard computer/mobile instantly switching mode ---
+        const currentIndex = channels.findIndex(c => c.id === currentChannel?.id);
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const nextIndex = (currentIndex + 1) % channels.length;
+          setCurrentChannel(channels[nextIndex]);
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          const prevIndex = (currentIndex - 1 + channels.length) % channels.length;
+          setCurrentChannel(channels[prevIndex]);
+        }
+      }
+      
+      // Handle Channel Numbers (e.g. Press '1' to tune to first channel, '2' to second, etc.)
+      if (e.key >= '0' && e.key <= '9') {
+        const num = parseInt(e.key, 10);
+        let targetIndex = num - 1;
+        if (num === 0) {
+          targetIndex = 9; // Map '0' to channel 10
+        }
+        
+        if (targetIndex >= 0 && targetIndex < channels.length) {
+          e.preventDefault();
+          setCurrentChannel(channels[targetIndex]);
+          setTvFocusIndex(targetIndex);
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [channels, currentChannel]);
+  }, [channels, currentChannel, isTvMode, tvFocusIndex, search]);
 
   const handleLogin = () => {
     setAuthError('');
@@ -267,11 +380,18 @@ export default function App() {
     <div className="h-screen bg-[#0A0A0A] text-white selection:bg-blue-500/30 font-sans flex flex-col overflow-hidden">
       {/* Header */}
       <header className="px-6 py-4 flex items-center justify-between border-b border-white/5 bg-black/40 backdrop-blur-md z-40 shrink-0">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-            <Tv size={20} className="text-white" />
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shadow-[0_0_15px_rgba(37,99,235,0.4)]">
+            <Tv size={18} className="text-white" />
           </div>
-          <h1 className="text-xl font-black tracking-tighter text-white">T-TV</h1>
+          <div className="flex items-center gap-1.5 select-none">
+            <span className="text-xl font-black tracking-tighter text-white uppercase sm:text-2xl">
+              T-TV
+            </span>
+            <span className="text-[10px] font-extrabold tracking-widest px-2 py-0.5 bg-blue-500/20 text-blue-400 border border-blue-500/30 rounded-md uppercase">
+              PLAY
+            </span>
+          </div>
         </div>
 
         <div className="flex items-center gap-4">
@@ -321,7 +441,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="flex-1 container mx-auto px-4 py-6 max-w-7xl overflow-hidden">
+      <main className="flex-1 container mx-auto px-4 sm:px-6 py-6 max-w-7xl overflow-hidden">
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-full">
           {/* Main Content Area */}
           <div className="lg:col-span-2 flex flex-col h-full overflow-hidden">
@@ -333,6 +453,7 @@ export default function App() {
                     initial={{ opacity: 0, scale: 0.98 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.98 }}
+                    className="h-full overflow-y-auto custom-scrollbar"
                   >
                     <AdminPanel channels={channels} config={config} onRefresh={() => {}} />
                   </motion.div>
@@ -342,9 +463,9 @@ export default function App() {
                     initial={{ opacity: 0, scale: 0.98 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.98 }}
-                    className="flex flex-col gap-5 w-full items-stretch"
+                    className="w-full h-full flex items-center justify-center"
                   >
-                    <div className="w-full flex flex-col gap-5">
+                    <div className="w-full aspect-video">
                       <VideoPlayer 
                         url={currentVideoUrl}
                         isAdMode={isAdMode}
@@ -353,10 +474,14 @@ export default function App() {
                         adLinkUrl={config?.adLinkUrl || ''}
                         adDuration={config?.initialAdDuration || 10}
                         onAdEnd={handleAdEnd}
-                        title={isAdMode ? 'Advertisement' : currentChannel?.name}
+                        title={isAdMode ? 'Advertisement' : (currentChannel?.name ? `${currentChannel.name} (NO. ${channels.findIndex(c => c.id === currentChannel.id) + 1})` : 'Live Stream')}
                         channels={channels}
                         currentChannelId={currentChannel?.id || ''}
                         onSelectChannel={setCurrentChannel}
+                        onFullscreenChange={setIsVideoFullscreen}
+                        isTvMode={isTvMode}
+                        tvFocusIndex={tvFocusIndex}
+                        setTvFocusIndex={setTvFocusIndex}
                       />
                     </div>
                   </motion.div>
@@ -376,6 +501,9 @@ export default function App() {
               }}
               search={search}
               onSearchChange={setSearch}
+              isTvMode={isTvMode}
+              tvFocusIndex={tvFocusIndex}
+              setTvFocusIndex={setTvFocusIndex}
             />
           </div>
         </div>
@@ -422,7 +550,7 @@ export default function App() {
                   }}
                   className={`flex-1 text-center py-2 text-xs font-semibold rounded-lg transition-all ${
                     activeTab === 'email' 
-                      ? 'bg-blue-605 bg-blue-605/10 bg-blue-600 text-white shadow' 
+                      ? 'bg-blue-600 text-white shadow' 
                       : 'text-white/60 hover:text-white'
                   }`}
                 >
@@ -446,14 +574,14 @@ export default function App() {
 
               {activeTab === 'google' ? (
                 <div className="space-y-6 py-4">
-                  <p className="text-sm text-white/60 leading-relaxed text-center">
+                  <p className="text-sm text-white/60 leading-relaxed text-center font-sans">
                     গুগল সাইন-ইন পপআপ উইন্ডো ব্যবহার করে। যদি আপনার ব্রাউজারে পপআপ ব্লক করা থাকে তবে নিচে নির্দেশিত সাহায্য দেখুন।
                   </p>
                   
                   <button
                     onClick={handleGoogleLogin}
                     disabled={authLoading}
-                    className="w-full py-3 bg-white text-black font-bold rounded-xl hover:bg-white/90 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow"
+                    className="w-full py-3 bg-white text-black font-bold rounded-xl hover:bg-white/90 active:scale-[0.98] transition-all flex items-center justify-center gap-2 shadow cursor-pointer"
                   >
                     <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
                       <path
@@ -478,8 +606,8 @@ export default function App() {
 
                   <div className="bg-blue-600/10 border border-blue-500/20 rounded-xl p-3 text-xs text-blue-400 space-y-1">
                     <p className="font-semibold">💡 পরামর্শ (Tip):</p>
-                    <p className="opacity-80 leading-relaxed">
-                      গুগল লগইন কাজ না করলে ডানদিকের "Open in New Tab" বাটনে ক্লিক করে অ্যাপটি নতুন ট্যাবে ওপেন করে ট্রাই করুন, অথবা সহজ "ইমেইল ও পাসওয়ার্ড" ব্যবহার করুন।
+                    <p className="opacity-80 leading-relaxed font-sans">
+                      গুগল লগইন কাজ না করলে ডানদিকের "Open in New Tab" বাটন দিয়ে বা ব্রাউজারে পপআপ অনুমোদন করে ট্রাই করুন, অথবা সহজ "ইমেইল ও পাসওয়ার্ড" ব্যবহার করুন।
                     </p>
                   </div>
                 </div>
@@ -533,7 +661,7 @@ export default function App() {
                     )}
                   </button>
 
-                  <div className="bg-zinc-800 border border-white/5 rounded-xl p-3 text-xs text-white/40 leading-relaxed">
+                  <div className="hidden bg-zinc-800 border border-white/5 rounded-xl p-3 text-xs text-white/40 leading-relaxed">
                     🌟 প্রথমবার প্রবেশের ক্ষেত্রে যেকোনো ৬ ডিজিটের পাসওয়ার্ড দিয়ে সাবমিট করলে অ্যাকাউন্টটি স্বয়ংক্রিয়ভাবে তৈরি হয়ে যাবে। পরবর্তী লগইনের জন্য সেই একই পাসওয়ার্ড ব্যবহার করবেন।
                   </div>
                 </form>
@@ -555,6 +683,144 @@ export default function App() {
               </AnimatePresence>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+
+
+      {/* Dynamic Keyboard Shortcuts Helper Dialog */}
+      <AnimatePresence>
+        {showShortcutsModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setShowShortcutsModal(false)}
+            className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-center justify-center p-4 selection:bg-blue-600/30"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 15 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 15 }}
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-2xl bg-zinc-950/98 border border-white/10 rounded-3xl p-6 sm:p-8 shadow-[0_24px_60px_rgba(0,0,0,0.85)] flex flex-col max-h-[90vh]"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-blue-600/15 border border-blue-500/30 rounded-xl flex items-center justify-center text-blue-400">
+                    <Keyboard size={20} />
+                  </div>
+                  <div className="text-left">
+                    <h2 className="text-lg font-extrabold tracking-tight text-white font-sans">
+                      কীবোর্ড শর্টকাট গাইড (Keyboard Shortcuts)
+                    </h2>
+                    <p className="text-[11px] text-zinc-400 mt-0.5">শর্টকাট ব্যবহার করে কীবোর্ড দিয়ে সম্পূর্ণ অ্যাপ কন্ট্রোল করুন।</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowShortcutsModal(false)}
+                  className="p-1.5 hover:bg-white/10 rounded-full text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                  title="বন্ধ করুন"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Scrollable list */}
+              <div className="flex-1 overflow-y-auto space-y-6 pr-1 custom-scrollbar text-left">
+                {/* Group 1: General Video Controls */}
+                <div>
+                  <h3 className="text-xs font-black tracking-widest text-blue-400 uppercase mb-3 font-mono">
+                    ১. প্লেব্যাক কন্ট্রোল (Video Playback)
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="flex items-center justify-between p-3 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                      <span className="text-xs text-zinc-300">প্লে / পজ (Play / Pause)</span>
+                      <div className="flex items-center gap-1.5">
+                        <kbd className="px-2 py-1 bg-zinc-850 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">SPACE</kbd>
+                        <span className="text-[9px] text-zinc-500">or</span>
+                        <kbd className="px-2 py-1 bg-zinc-850 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">K</kbd>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                      <span className="text-xs text-zinc-300">শব্দ সচল / মিউট (Mute Toggle)</span>
+                      <kbd className="px-2 py-1 bg-zinc-855 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">M</kbd>
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                      <span className="text-xs text-zinc-300">ফুলস্ক্রিন ভিউ (Fullscreen Toggle)</span>
+                      <kbd className="px-2 py-1 bg-zinc-855 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">F</kbd>
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                      <span className="text-xs text-zinc-300">অ্যাসপেক্ট রেশিও (Aspect Ratio / Fit)</span>
+                      <kbd className="px-2 py-1 bg-zinc-855 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">A</kbd>
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                      <span className="text-xs text-zinc-300">সাউন্ড পরিবর্তন (Volume Up / Down)</span>
+                      <div className="flex items-center gap-1">
+                        <kbd className="px-2 py-1 bg-zinc-855 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">▲</kbd>
+                        <kbd className="px-2 py-1 bg-zinc-855 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">▼</kbd>
+                        <span className="text-[10px] text-zinc-500 pl-1">Keys</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Group 2: Channel Switching */}
+                <div>
+                  <h3 className="text-xs font-black tracking-widest text-emerald-400 uppercase mb-3 font-mono">
+                    ২. লাইভ চ্যানেল ব্রাউজিং (Channel Navigation)
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="flex items-center justify-between p-3 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                      <span className="text-xs text-zinc-300">পরবর্তী / পূর্ববর্তী চ্যানেল (Switch Channels)</span>
+                      <kbd className="px-2 py-1 bg-zinc-855 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">▲ / ▼ Arrows</kbd>
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors">
+                      <span className="text-xs text-zinc-300">ফুলস্ক্রিন তালিকা Sidebar (Toggle Sidebar)</span>
+                      <kbd className="px-2 py-1 bg-zinc-855 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">C</kbd>
+                    </div>
+
+                    <div className="flex items-center justify-between p-3 bg-white/5 rounded-2xl border border-white/5 hover:border-white/10 transition-colors col-span-1 md:col-span-2">
+                      <span className="text-xs text-zinc-300">চ্যানেল নম্বর ১ থেকে ১০ সরাসরি নির্বাচন (Switch Channel 1-10)</span>
+                      <div className="flex items-center gap-1.5">
+                        <kbd className="px-2 py-1 bg-zinc-855 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">1</kbd>
+                        <span className="text-zinc-500">to</span>
+                        <kbd className="px-2 py-1 bg-zinc-855 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">9</kbd>
+                        <span className="text-zinc-500">and</span>
+                        <kbd className="px-2 py-1 bg-zinc-855 text-zinc-100 border border-zinc-700 text-[9px] font-bold rounded-md shadow-inner font-mono">0</kbd>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+
+
+                {/* Info block */}
+                <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl text-[11px] text-blue-400 leading-normal mt-4">
+                  💡 <b>টিপস:</b> আপনি অ্যাপের কীবোর্ড শর্টকাট লিস্ট দেখতে যেকোনো সময় সরাসরি কী-বোর্ড থেকে <b>H</b> কি-টি প্রেস করতে পারেন।
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="mt-6 pt-4 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <span className="text-[10px] text-zinc-500">
+                  শর্টকাট প্যানেলটি বন্ধ করতে যেকোনো জায়গায় ক্লিক করুন অথবা <kbd className="px-1.5 py-0.5 bg-zinc-900 border border-zinc-800 rounded font-mono">ESC</kbd> টিপুন।
+                </span>
+                <button
+                  onClick={() => setShowShortcutsModal(false)}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-lg transition-transform hover:scale-102 active:scale-98 cursor-pointer"
+                >
+                  ঠিক আছে (Close Help)
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>

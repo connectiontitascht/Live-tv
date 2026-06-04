@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Tita TV</string>
+    <string name="title_activity_main">Tita TV</string>
+    <string name="package_name">com.titatv.app</string>
+    <string name="custom_url_scheme">com.titatv.app</string>
+</resources>

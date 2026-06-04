@@ -13,7 +13,8 @@ import {
   X,
   ChevronUp,
   ChevronDown,
-  WifiOff
+  WifiOff,
+  Crop
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Channel } from '../types';
@@ -30,6 +31,10 @@ interface VideoPlayerProps {
   channels?: Channel[];
   currentChannelId?: string;
   onSelectChannel?: (channel: Channel) => void;
+  onFullscreenChange?: (expanded: boolean) => void;
+  isTvMode?: boolean;
+  tvFocusIndex?: number;
+  setTvFocusIndex?: (index: number) => void;
 }
 
 export default function VideoPlayer({ 
@@ -43,7 +48,11 @@ export default function VideoPlayer({
   title,
   channels,
   currentChannelId,
-  onSelectChannel
+  onSelectChannel,
+  onFullscreenChange,
+  isTvMode = false,
+  tvFocusIndex = 0,
+  setTvFocusIndex
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -53,6 +62,57 @@ export default function VideoPlayer({
   const [showControls, setShowControls] = useState(true);
   const [timeLeft, setTimeLeft] = useState(adDuration || 0);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Custom volume & OSD state
+  const [volume, setVolume] = useState(() => {
+    const saved = localStorage.getItem('playerVolume');
+    return saved ? parseFloat(saved) : 1.0;
+  });
+
+  // Custom aspect ratio state (contain = default 16:9, cover = zoom, fill = stretch)
+  const [aspectRatio, setAspectRatio] = useState<'contain' | 'cover' | 'fill'>(() => {
+    const saved = localStorage.getItem('playerAspectRatio');
+    return (saved as 'contain' | 'cover' | 'fill') || 'contain';
+  });
+
+  const [osdMessage, setOsdMessage] = useState<{ text: string; mode: 'mute' | 'unmute' | 'play' | 'pause' | 'volume' | 'fullscreen' | 'sidebar' | 'info' | 'aspect'; val?: string; id: number } | null>(null);
+  const osdTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const triggerOsd = (text: string, mode: 'mute' | 'unmute' | 'play' | 'pause' | 'volume' | 'fullscreen' | 'sidebar' | 'info' | 'aspect', val?: string) => {
+    setOsdMessage({ text, mode, val, id: Date.now() });
+    if (osdTimeoutRef.current) clearTimeout(osdTimeoutRef.current);
+    osdTimeoutRef.current = setTimeout(() => {
+      setOsdMessage(null);
+    }, 1500);
+  };
+
+  const cycleAspectRatio = () => {
+    setAspectRatio((prev) => {
+      let next: 'contain' | 'cover' | 'fill' = 'contain';
+      let caption = '';
+      if (prev === 'contain') {
+        next = 'fill';
+        caption = 'স্ট্রেচ ফিট (Stretch Mode)';
+      } else if (prev === 'fill') {
+        next = 'cover';
+        caption = 'জুম ফিট (Zoom / Crop)';
+      } else {
+        next = 'contain';
+        caption = '১৬:৯ ফিট (Original Contain)';
+      }
+      localStorage.setItem('playerAspectRatio', next);
+      triggerOsd(`স্ক্রিন ফিট: ${caption}`, 'aspect');
+      return next;
+    });
+  };
+
+  // Sync actual video element volume when the state changes
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.volume = volume;
+    }
+    localStorage.setItem('playerVolume', String(volume));
+  }, [volume]);
 
   // Offline handler states
   const [isOffline, setIsOffline] = useState(false);
@@ -114,8 +174,30 @@ export default function VideoPlayer({
   const [isForcedLandscape, setIsForcedLandscape] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
   const [searchInFullscreen, setSearchInFullscreen] = useState('');
+  const [isMobilePortrait, setIsMobilePortrait] = useState(false);
 
-  const isPlayerExpanded = isFullscreen || isWebFullscreen || isForcedLandscape;
+  useEffect(() => {
+    const checkOrientation = () => {
+      const isPortrait = window.innerHeight > window.innerWidth;
+      const isSmallScreen = window.innerWidth < 1024;
+      setIsMobilePortrait(isPortrait && isSmallScreen);
+    };
+
+    checkOrientation();
+    window.addEventListener('resize', checkOrientation);
+    window.addEventListener('orientationchange', checkOrientation);
+    return () => {
+      window.removeEventListener('resize', checkOrientation);
+      window.removeEventListener('orientationchange', checkOrientation);
+    };
+  }, []);
+
+  const shouldForceLandscapeRotate = (isFullscreen || isWebFullscreen) && isMobilePortrait;
+  const isPlayerExpanded = isFullscreen || isWebFullscreen || isForcedLandscape || shouldForceLandscapeRotate;
+
+  useEffect(() => {
+    onFullscreenChange?.(isPlayerExpanded);
+  }, [isPlayerExpanded, onFullscreenChange]);
 
   const userMutedRef = useRef(false);
   const autoplayMutedRef = useRef(false);
@@ -168,29 +250,84 @@ export default function VideoPlayer({
     if (!video) return;
 
     let hls: Hls | null = null;
+    let active = true;
+    let watchdogTimer: NodeJS.Timeout | null = null;
 
-    const handleNativeError = () => {
-      console.log('Video element native error triggered');
+    const triggerOffline = () => {
+      if (!active) return;
+      console.log('Playback failure detected: triggering offline overlay.');
       triggerOfflineSwitch();
     };
 
+    const resetWatchdog = () => {
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+      }
+      watchdogTimer = setTimeout(() => {
+        if (!active) return;
+        // If the stream is still stalled, not playing, or stuck at 0 time
+        if (video.paused || video.currentTime === 0 || video.readyState < 3) {
+          console.log('Watchdog timeout: Video has failed to start playing within 5 seconds.');
+          triggerOffline();
+        }
+      }, 5000);
+    };
+
+    // Initialize watchdog timer as soon as loading starts
+    resetWatchdog();
+
+    const handleNativeError = () => {
+      if (!active) return;
+      console.log('Video element native error triggered');
+      triggerOffline();
+    };
+
+    const handlePlaying = () => {
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer);
+        watchdogTimer = null;
+      }
+    };
+
+    const handleWaiting = () => {
+      if (!watchdogTimer && !isOfflineRef.current) {
+        resetWatchdog();
+      }
+    };
+
     video.addEventListener('error', handleNativeError);
+    video.addEventListener('playing', handlePlaying);
+    video.addEventListener('timeupdate', handlePlaying);
+    video.addEventListener('waiting', handleWaiting);
+    video.addEventListener('stalled', handleWaiting);
 
     if (Hls.isSupported()) {
       hls = new Hls({
         enableWorker: true,
+        manifestLoadingTimeOut: 4000,
+        levelLoadingTimeOut: 4000,
       });
       hls.loadSource(url);
       hls.attachMedia(video);
 
       hls.on(Hls.Events.ERROR, (event, data) => {
+        if (!active) return;
         console.error('HLS error event:', data);
-        if (data.fatal) {
-          triggerOfflineSwitch();
+        // Trigger offline immediately on fatal or loading-related errors
+        if (
+          data.fatal || 
+          data.details === 'manifestLoadError' || 
+          data.details === 'manifestParsingError' || 
+          data.details === 'levelLoadError' || 
+          data.details === 'manifestLoadTimeOut' ||
+          data.details === 'levelLoadTimeOut'
+        ) {
+          triggerOffline();
         }
       });
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        if (!active) return;
         if (!userMutedRef.current) {
           video.muted = false;
           setIsMuted(false);
@@ -200,11 +337,18 @@ export default function VideoPlayer({
         }
         // Attempt autoplay; if unmuted is rejected, try muted autoplay
         video.play().catch((err) => {
+          if (!active) return;
+          if (err.name === 'AbortError') {
+            console.log('Play request was aborted/interrupted by a new load request (normal behavior during channel changes).');
+            return;
+          }
           console.warn('Unmuted autoplay rejected, falling back to muted autoplay:', err);
           video.muted = true;
           setIsMuted(true);
           autoplayMutedRef.current = true;
           video.play().catch((e) => {
+            if (!active) return;
+            if (e.name === 'AbortError') return;
             console.error('Muted autoplay also rejected:', e);
             setIsPlaying(false);
           });
@@ -212,7 +356,8 @@ export default function VideoPlayer({
       });
     } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
       video.src = url;
-      video.addEventListener('loadedmetadata', () => {
+      const handleLoadedMetadata = () => {
+        if (!active) return;
         if (!userMutedRef.current) {
           video.muted = false;
           setIsMuted(false);
@@ -222,21 +367,32 @@ export default function VideoPlayer({
         }
         // Attempt autoplay; if unmuted is rejected, try muted autoplay
         video.play().catch((err) => {
+          if (!active) return;
+          if (err.name === 'AbortError') return;
           console.warn('Unmuted autoplay rejected, falling back to muted autoplay:', err);
           video.muted = true;
           setIsMuted(true);
           autoplayMutedRef.current = true;
           video.play().catch((e) => {
+            if (!active) return;
+            if (e.name === 'AbortError') return;
             console.error('Muted autoplay also rejected:', e);
             setIsPlaying(false);
           });
         });
-      });
+      };
+      video.addEventListener('loadedmetadata', handleLoadedMetadata);
     }
 
     return () => {
+      active = false;
       if (hls) hls.destroy();
+      if (watchdogTimer) clearTimeout(watchdogTimer);
       video.removeEventListener('error', handleNativeError);
+      video.removeEventListener('playing', handlePlaying);
+      video.removeEventListener('timeupdate', handlePlaying);
+      video.removeEventListener('waiting', handleWaiting);
+      video.removeEventListener('stalled', handleWaiting);
     };
   }, [url]);
 
@@ -291,17 +447,133 @@ export default function VideoPlayer({
     };
   }, []);
 
-  // Listen to Escape Key to dismiss web fullscreens/rotations
+  // Listen to Escape / Space / Enter / Arrow Keys / letters for rich computer keyboard hortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore key events if user is typing in search or config inputs
+      if (
+        document.activeElement?.tagName === 'INPUT' ||
+        document.activeElement?.tagName === 'TEXTAREA'
+      ) {
+        return;
+      }
+
+      const keyLower = e.key.toLowerCase();
+
+      // 'a' or 'A' - Cycle Aspect Ratio
+      if (keyLower === 'a') {
+        e.preventDefault();
+        cycleAspectRatio();
+        return;
+      }
+
+      // 'f' or 'F' - Fullscreen
+      if (keyLower === 'f') {
+        e.preventDefault();
+        handleToggleFullscreen();
+        triggerOsd(
+          isPlayerExpanded ? "ফুলস্ক্রিন ভিউ বন্ধ (Exit Fullscreen)" : "ফুলস্ক্রিন ভিউ চালু (Fullscreen)", 
+          'fullscreen'
+        );
+        return;
+      }
+
+      // 'm' or 'M' - Mute Toggle
+      if (keyLower === 'm') {
+        e.preventDefault();
+        toggleMute();
+        return;
+      }
+
+      // 'c' or 'C' - Toggle Sidebar in Fullscreen
+      if (keyLower === 'c') {
+        if (isPlayerExpanded) {
+          e.preventDefault();
+          const nextSidebar = !showSidebar;
+          setShowSidebar(nextSidebar);
+          triggerOsd(
+            nextSidebar ? "চ্যানেল তালিকা চালু (Show Sidebar)" : "চ্যানেল তালিকা বন্ধ (Hide Sidebar)", 
+            'sidebar'
+          );
+        }
+        return;
+      }
+
       if (e.key === 'Escape') {
-        setIsWebFullscreen(false);
-        setIsForcedLandscape(false);
+        if (isPlayerExpanded) {
+          e.preventDefault();
+          setIsWebFullscreen(false);
+          setIsForcedLandscape(false);
+          triggerOsd("ফুলস্ক্রিন মড বন্ধ", 'fullscreen');
+        }
+      } else if (e.key === ' ' || e.key === 'Enter' || keyLower === 'k') {
+        const activeTag = document.activeElement?.tagName;
+        if (activeTag === 'BUTTON' || activeTag === 'A') {
+          return;
+        }
+        e.preventDefault();
+        togglePlay();
+      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        if (!isTvMode) {
+          e.preventDefault();
+          if (e.key === 'ArrowUp') {
+            const newVal = Math.min(1.0, volume + 0.1);
+            setVolume(newVal);
+            if (videoRef.current) {
+              videoRef.current.volume = newVal;
+              if (isMuted && newVal > 0) {
+                videoRef.current.muted = false;
+                setIsMuted(false);
+              }
+            }
+            triggerOsd(`সাউন্ড লেভেল: ${Math.round(newVal * 100)}%`, 'volume', `${Math.round(newVal * 100)}%`);
+          } else if (e.key === 'ArrowDown') {
+            const newVal = Math.max(0.0, volume - 0.1);
+            setVolume(newVal);
+            if (videoRef.current) {
+              videoRef.current.volume = newVal;
+              if (newVal === 0) {
+                videoRef.current.muted = true;
+                setIsMuted(true);
+              }
+            }
+            triggerOsd(`সাউন্ড লেভেল: ${Math.round(newVal * 100)}%`, 'volume', `${Math.round(newVal * 100)}%`);
+          }
+        }
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        if (isTvMode) {
+          e.preventDefault();
+          if (e.key === 'ArrowLeft') {
+            if (videoRef.current) {
+              videoRef.current.muted = true;
+              setIsMuted(true);
+              userMutedRef.current = true;
+              triggerOsd("শব্দ বন্ধ (Muted)", 'mute');
+            }
+          } else if (e.key === 'ArrowRight') {
+            if (videoRef.current) {
+              videoRef.current.muted = false;
+              setIsMuted(false);
+              userMutedRef.current = false;
+              triggerOsd(`শব্দ চালু (Sound Unmuted)`, 'unmute', `${Math.round(volume * 100)}%`);
+            }
+          }
+        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [isPlaying, isMuted, volume, isTvMode, isPlayerExpanded, showSidebar]);
+
+  // Support auto-scrolling focused items in fullscreen TV mode sidebar
+  useEffect(() => {
+    if (isTvMode && isPlayerExpanded && showSidebar) {
+      const el = document.getElementById(`fs-channel-card-${tvFocusIndex}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+  }, [tvFocusIndex, isTvMode, isPlayerExpanded, showSidebar]);
 
   const togglePlay = () => {
     if (videoRef.current) {
@@ -310,7 +582,9 @@ export default function VideoPlayer({
       } else {
         videoRef.current.play();
       }
-      setIsPlaying(!isPlaying);
+      const nextVal = !isPlaying;
+      setIsPlaying(nextVal);
+      triggerOsd(nextVal ? "ভিডিও প্লে করা হয়েছে (Play)" : "ভিডিও পজ করা হয়েছে (Pause)", nextVal ? 'play' : 'pause');
     }
   };
 
@@ -320,6 +594,11 @@ export default function VideoPlayer({
       videoRef.current.muted = nextMuted;
       setIsMuted(nextMuted);
       userMutedRef.current = nextMuted;
+      triggerOsd(
+        nextMuted ? "শব্দ বন্ধ (Muted)" : `শব্দ চালু (Sound Unmuted)`, 
+        nextMuted ? 'mute' : 'unmute', 
+        nextMuted ? undefined : `${Math.round(volume * 100)}%`
+      );
     }
   };
 
@@ -347,6 +626,17 @@ export default function VideoPlayer({
       if (screenAny.orientation && screenAny.orientation.lock) {
         screenAny.orientation.lock('landscape').catch(() => {});
       }
+      // Try native video element fullscreen fallback (extremely helpful on iOS Safari)
+      if (videoRef.current) {
+        const videoAny = videoRef.current as any;
+        if (videoAny.webkitEnterFullscreen) {
+          try {
+            videoAny.webkitEnterFullscreen();
+          } catch (e) {
+            console.warn('webkitEnterFullscreen error:', e);
+          }
+        }
+      }
     }
   };
 
@@ -370,7 +660,7 @@ export default function VideoPlayer({
     c.name.toLowerCase().includes(searchInFullscreen.toLowerCase())
   );
 
-  const rotationStyle: React.CSSProperties = isForcedLandscape ? {
+  const rotationStyle: React.CSSProperties = isForcedLandscape || shouldForceLandscapeRotate ? {
     position: 'fixed',
     top: '50%',
     left: '50%',
@@ -400,7 +690,9 @@ export default function VideoPlayer({
         {url ? (
           <video
             ref={videoRef}
-            className="w-full h-full object-contain cursor-pointer"
+            className={`w-full h-full cursor-pointer transition-all duration-300 ${
+              aspectRatio === 'cover' ? 'object-cover' : aspectRatio === 'fill' ? 'object-fill' : 'object-contain'
+            }`}
             playsInline
             autoPlay
             muted={isAdMode && adType === 'image' ? true : isMuted}
@@ -421,37 +713,45 @@ export default function VideoPlayer({
             <div className="w-16 h-16 bg-blue-600/10 border border-blue-500/20 rounded-2xl flex items-center justify-center text-blue-500 mb-4 animate-pulse">
               <Tv size={36} />
             </div>
-            <h3 className="text-xl font-bold tracking-tight mb-2">কোনো লাইভ চ্যানেল নির্বাচন করা হয়নি</h3>
-            <p className="text-sm text-white/40 max-w-sm mb-4">
-              অনুগ্রহ করে ডানপাশের চ্যানেল তালিকা থেকে একটি চ্যানেল নির্বাচন করুন অথবা এডমিন হিসেবে লগইন করে নতুন চ্যানেল যোগ করুন।
-            </p>
-            <div className="text-xs text-blue-400 font-mono bg-blue-500/5 px-2.5 py-1 rounded-full border border-blue-500/10">
-              T-TV PLAY • Live Stream Server
-            </div>
+            <h3 className="text-xl font-bold tracking-tight mb-2">কোনো চ্যানেল নির্বাচন করা হয়নি</h3>
+            <p className="text-sm text-zinc-400">তালিকা থেকে অনুগ্রহ করে একটি চ্যানেল নির্বাচন করুন</p>
           </div>
         )}
 
-        {/* Offline Overlay - চ্যানেল খেলা না হলে অফলাইন লেখা দেখাবে এবং পরবর্তী চ্যানেলে অটো সুইচ করবে */}
+        {/* Offline Overlay - চ্যানেল অফলাইন থাকলে দেখাবে এবং পরবর্তী চ্যানেলে অটো স্যুইচ হবে */}
         <AnimatePresence>
           {isOffline && !isAdMode && (
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="absolute inset-0 z-40 bg-zinc-950/98 backdrop-blur-md flex flex-col items-center justify-center text-center p-6 select-none"
+              className="absolute inset-0 z-40 flex flex-col items-center justify-center text-center p-6 select-none overflow-hidden"
               id="offline-overlay"
             >
-              <div className="w-16 h-16 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-center justify-center text-red-550 mb-4 animate-bounce">
-                <WifiOff size={32} />
-              </div>
-              <h3 className="text-xl font-bold tracking-tight text-white mb-2 font-sans">চ্যানেলটি অফলাইন আছে (Offline)</h3>
-              <p className="text-sm text-white/50 max-w-sm mb-6 leading-relaxed font-sans">
-                এই চ্যানেলটির সম্প্রচার এই মুহূর্তে বন্ধ রয়েছে অথবা সোর্স সংযোগটি সক্রিয় নেই।
-              </p>
-              <div className="flex items-center gap-2 text-xs bg-red-500/10 px-4.5 py-2.5 rounded-full border border-red-500/20 text-red-500 font-sans font-bold shadow-lg shadow-black/40">
-                <span className="w-2 h-2 rounded-full bg-red-500 animate-ping shrink-0" />
-                <span>{offlineCountdown} সেকেন্ডের মধ্যে পরবর্তী চ্যানেলে স্যুইচ করা হচ্ছে...</span>
-              </div>
+              {/* Background Animated Video - fully active and clearly visible */}
+              <video
+                className="absolute inset-0 w-full h-full object-cover pointer-events-none opacity-85 z-0 scale-100"
+                src="https://assets.mixkit.co/videos/preview/mixkit-abstract-laser-lights-background-loop-41850-large.mp4"
+                autoPlay
+                loop
+                muted
+                playsInline
+              />
+              
+              {/* Gradient Overlay for high readability while keeping video active */}
+              <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-zinc-950/40 to-black/70 backdrop-blur-[2px] z-10" />
+
+              {/* Only the glowing, animating OFFLINE text remains */}
+              <motion.div 
+                initial={{ scale: 0.8, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                transition={{ type: "spring", damping: 20, stiffness: 150 }}
+                className="relative z-20 text-center select-none"
+              >
+                <span className="text-5xl sm:text-7xl font-black tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-red-500 via-rose-400 to-red-600 drop-shadow-[0_2px_30px_rgba(239,68,68,0.85)] uppercase animate-pulse">
+                  OFFLINE
+                </span>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -530,18 +830,36 @@ export default function VideoPlayer({
                 
                 {/* Control Action Buttons */}
                 <div className="flex items-center gap-2">
-                  {/* Channels Sidebar Toggle (only in Expanded Mode) */}
                   {isPlayerExpanded && channels && channels.length > 0 && (
-                    <button
-                      onClick={() => setShowSidebar(!showSidebar)}
+                    <button 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShowSidebar(!showSidebar);
+                      }}
                       className={`p-2 rounded-lg text-white transition-colors ${
-                        showSidebar ? 'bg-blue-600' : 'bg-white/10 hover:bg-white/20'
+                        showSidebar ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white/10 hover:bg-white/20'
                       }`}
-                      title={showSidebar ? "চ্যানেল তালিকা লুকান" : "চ্যানেল তালিকা দেখুন"}
+                      title={showSidebar ? 'চ্যানেল লিস্ট লুকান' : 'চ্যানেল লিস্ট দেখান'}
+                      id="fullscreen-sidebar-toggle-btn"
                     >
                       <List size={20} />
                     </button>
                   )}
+                  {/* Aspect Ratio Button */}
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      cycleAspectRatio();
+                    }}
+                    className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-all flex items-center gap-1.5"
+                    title="স্ক্রিন ফিট / অ্যাসপেক্ট রেশিও পরিবর্তন (Aspect Ratio / Fit Mode - Press A)"
+                    id="aspect-ratio-btn"
+                  >
+                    <Crop size={18} className="text-amber-400" />
+                    <span className="text-[10px] font-black uppercase tracking-tight bg-white/10 px-1 py-0.5 rounded text-zinc-300">
+                      {aspectRatio === 'contain' ? '16:9' : aspectRatio === 'fill' ? 'Stretch' : 'Zoom'}
+                    </span>
+                  </button>
 
                   {/* Fullscreen Button */}
                   <button 
@@ -613,83 +931,127 @@ export default function VideoPlayer({
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* OSD (On-Screen Display) Alert */}
+        <AnimatePresence>
+          {osdMessage && (
+            <motion.div
+              key={osdMessage.id}
+              initial={{ opacity: 0, scale: 0.85, y: -20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.85, y: 20 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 350 }}
+              className="absolute top-16 left-1/2 transform -translate-x-1/2 z-50 bg-black/85 backdrop-blur-md rounded-2xl border border-white/10 px-5 py-3 flex items-center gap-3 shadow-[0_8px_32px_rgba(0,0,0,0.5)] select-none pointer-events-none"
+            >
+              <div className="text-blue-500">
+                {osdMessage.mode === 'play' && <Play size={20} className="fill-current text-blue-400" />}
+                {osdMessage.mode === 'pause' && <Pause size={20} className="fill-current text-blue-400" />}
+                {osdMessage.mode === 'mute' && <VolumeX size={20} className="text-red-400" />}
+                {osdMessage.mode === 'unmute' && <Volume2 size={20} className="text-emerald-400" />}
+                {osdMessage.mode === 'volume' && <Volume2 size={20} className="text-blue-400" />}
+                {osdMessage.mode === 'fullscreen' && <Maximize2 size={20} className="text-amber-400" />}
+                {osdMessage.mode === 'sidebar' && <List size={20} className="text-purple-400" />}
+                {osdMessage.mode === 'aspect' && <Crop size={20} className="text-amber-400" />}
+              </div>
+              <div className="flex flex-col">
+                <span className="text-white text-xs font-extrabold tracking-tight font-sans">
+                  {osdMessage.text}
+                </span>
+                {osdMessage.val && (
+                  <div className="w-24 bg-white/10 h-1.5 rounded-full mt-1.5 overflow-hidden">
+                    <div 
+                      className="bg-blue-500 h-full rounded-full transition-all duration-150"
+                      style={{ width: osdMessage.val }}
+                    />
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      {/* RIGHT SECTION: Compact Scrollable Channels List inside Fullscreen */}
+      {/* RIGHT SECTION / SIDEBAR: Fullscreen Channel list */}
       {isPlayerExpanded && showSidebar && channels && channels.length > 0 && (
-        <div className="w-[260px] sm:w-[300px] h-full shrink-0 border-l border-white/10 bg-[#0A0A0A]/95 backdrop-blur-md flex flex-col z-30 transition-all duration-300">
-          {/* Header */}
-          <div className="p-3.5 border-b border-white/10 flex items-center justify-between bg-black/40">
-            <div className="flex items-center gap-2">
-              <Tv size={16} className="text-blue-500 animate-pulse" />
-              <span className="text-xs sm:text-sm font-bold text-white tracking-wide">লাইভ চ্যানেলসমূহ</span>
+        <div 
+          className="w-72 sm:w-80 h-full border-l border-white/10 bg-zinc-950/95 backdrop-blur-md flex flex-col z-[45] shrink-0 relative" 
+          onClick={(e) => e.stopPropagation()}
+          id="fullscreen-channel-sidebar"
+        >
+          {/* Sidebar Header */}
+          <div className="p-4 border-b border-white/10 flex items-center justify-between">
+            <div className="flex flex-col">
+              <span className="text-white font-bold text-sm tracking-tight flex items-center gap-1.5">
+                <Tv size={16} className="text-blue-400" />
+                চ্যানেল তালিকা
+              </span>
+              <span className="text-[10px] text-white/40 mt-0.5">Channel List ({channels.length})</span>
             </div>
-            <button 
+            <button
               onClick={() => setShowSidebar(false)}
-              className="p-1 hover:bg-white/5 rounded text-white/40 hover:text-white transition-all"
-              title="লুকান"
+              className="text-white/60 hover:text-white p-1 hover:bg-white/5 rounded-lg transition-all"
+              title="Close list"
             >
-              <X size={16} />
+              <X size={18} />
             </button>
           </div>
 
-          {/* Search bar */}
-          <div className="p-2 border-b border-white/5 bg-black/10">
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/30" size={13} />
-              <input
-                type="text"
-                placeholder="চ্যানেল খুঁজুন..."
-                className="w-full bg-white/5 border border-white/10 rounded-lg py-1.5 pl-8 pr-3 text-xs text-white placeholder:text-white/20 focus:outline-none focus:ring-1 focus:ring-blue-500/50 transition-all font-sans"
-                value={searchInFullscreen}
-                onChange={(e) => setSearchInFullscreen(e.target.value)}
-              />
-            </div>
+          {/* Search Box */}
+          <div className="p-3 border-b border-white/5 relative">
+            <Search size={14} className="absolute left-6.5 top-1/2 -translate-y-1/2 text-white/40" />
+            <input
+              type="text"
+              value={searchInFullscreen}
+              onChange={(e) => setSearchInFullscreen(e.target.value)}
+              placeholder="চ্যানেল খুঁজুন (Search)..."
+              className="w-full bg-white/5 hover:bg-white/10 focus:bg-white/10 text-white placeholder-white/30 rounded-xl text-xs pl-9 pr-4 py-2 border border-white/5 focus:border-blue-500/50 outline-none transition-all"
+            />
           </div>
 
-          {/* Scrollable channels */}
-          <div className="flex-1 overflow-y-auto p-2 space-y-1 scrollbar-thin scrollbar-thumb-zinc-800">
-            {filteredChannels.length > 0 ? (
-              filteredChannels.map((channel) => (
+          {/* Channels list */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1 font-sans">
+            {filteredChannels.sort((a, b) => a.order - b.order).map((channel) => {
+              const active = currentChannelId === channel.id;
+              const overallIndex = channels.findIndex(c => c.id === channel.id);
+              const isFocused = isTvMode && tvFocusIndex === overallIndex;
+
+              return (
                 <button
                   key={channel.id}
+                  id={`fs-channel-card-${overallIndex}`}
                   onClick={() => {
                     onSelectChannel?.(channel);
-                    // On small mobile, auto close sidebar to focus on stream
-                    if (window.innerWidth < 640) {
-                      setShowSidebar(false);
-                    }
+                    if (setTvFocusIndex) setTvFocusIndex(overallIndex);
                   }}
-                  className={`w-full flex items-center gap-2.5 p-2 rounded-xl transition-all text-left duration-200 ${
-                    currentChannelId === channel.id 
-                      ? 'bg-blue-600 text-white font-medium shadow' 
-                      : 'text-white/60 hover:bg-white/5 hover:text-white'
+                  className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition-all cursor-pointer text-left outline-none ${
+                    isFocused
+                      ? 'ring-4 ring-amber-500 bg-amber-500/20 font-bold text-white shadow-lg border-amber-500/50 scale-[1.01]'
+                      : active 
+                      ? 'bg-blue-600 font-bold text-white shadow-lg shadow-blue-600/10' 
+                      : 'hover:bg-white/5 text-white/70 hover:text-white'
                   }`}
                 >
-                  <div className={`w-8 h-8 rounded-lg overflow-hidden shrink-0 bg-black/40 flex items-center justify-center border ${
-                    currentChannelId === channel.id ? 'border-white/20' : 'border-white/5'
-                  }`}>
+                  <div className="w-10 h-7 bg-black/40 border border-white/10 rounded-lg flex items-center justify-center overflow-hidden shrink-0">
                     {channel.logo ? (
                       <img src={channel.logo} alt={channel.name} className="w-full h-full object-contain p-0.5" referrerPolicy="no-referrer" />
                     ) : (
                       <Tv size={14} className="opacity-40" />
                     )}
                   </div>
-                  <span className="text-xs line-clamp-1 flex-1 font-sans font-medium">{channel.name}</span>
-                  {currentChannelId === channel.id && (
-                    <motion.div
-                      initial={{ scale: 0.8, opacity: 0.5 }}
-                      animate={{ scale: 1, opacity: 1 }}
-                      transition={{ repeat: Infinity, repeatType: "reverse", duration: 0.8 }}
-                      className="w-1.5 h-1.5 rounded-full bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)] shrink-0"
-                    />
-                  )}
+                  <div className="flex-1 min-w-0 flex flex-col">
+                    <span className="text-xs font-semibold truncate leading-tight">{channel.name}</span>
+                    <span className={`text-[9px] uppercase tracking-wider font-mono mt-0.5 ${
+                      isFocused ? 'text-amber-300 font-bold' : active ? 'text-white/70' : 'text-white/30'
+                    }`}>
+                      NO. {overallIndex + 1}
+                    </span>
+                  </div>
                 </button>
-              ))
-            ) : (
-              <div className="flex flex-col items-center justify-center py-10 text-white/20 text-xs">
-                <Search size={22} className="mb-2 opacity-10" />
-                <span>চ্যানেল পাওয়া যায়নি</span>
+              );
+            })}
+            {filteredChannels.length === 0 && (
+              <div className="text-center py-8 text-white/40 text-xs">
+                কোনো চ্যানেল পাওয়া যায়নি
               </div>
             )}
           </div>

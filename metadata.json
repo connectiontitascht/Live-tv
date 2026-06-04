@@ -2,5 +2,5 @@
   "name": "T-TV PLAY",
   "description": "Live TV streaming Server. \nAuthor : Titas Internet \nHotline : 01841049028",
   "requestFramePermissions": [],
-  "majorCapabilities": []
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
