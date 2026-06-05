@@ -92,16 +92,16 @@ export default function VideoPlayer({
       let caption = '';
       if (prev === 'contain') {
         next = 'fill';
-        caption = 'স্ট্রেচ ফিট (Stretch Mode)';
+        caption = 'Stretch Mode';
       } else if (prev === 'fill') {
         next = 'cover';
-        caption = 'জুম ফিট (Zoom / Crop)';
+        caption = 'Zoom / Crop';
       } else {
         next = 'contain';
-        caption = '১৬:৯ ফিট (Original Contain)';
+        caption = 'Original Contain (16:9)';
       }
       localStorage.setItem('playerAspectRatio', next);
-      triggerOsd(`স্ক্রিন ফিট: ${caption}`, 'aspect');
+      triggerOsd(`Screen Fit: ${caption}`, 'aspect');
       return next;
     });
   };
@@ -219,7 +219,21 @@ export default function VideoPlayer({
         videoRef.current.muted = false;
       }
     }
+
+    // Auto-hide controls and overlays on top of the player after 2 seconds
+    setShowControls(true);
+    if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    controlsTimeoutRef.current = setTimeout(() => {
+      setShowControls(false);
+    }, 2000);
   }, [url]);
+
+  // Clean up controls timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (controlsTimeoutRef.current) clearTimeout(controlsTimeoutRef.current);
+    };
+  }, []);
 
   // Automatically unmute as soon as any user interaction occurs on the document
   useEffect(() => {
@@ -472,7 +486,7 @@ export default function VideoPlayer({
         e.preventDefault();
         handleToggleFullscreen();
         triggerOsd(
-          isPlayerExpanded ? "ফুলস্ক্রিন ভিউ বন্ধ (Exit Fullscreen)" : "ফুলস্ক্রিন ভিউ চালু (Fullscreen)", 
+          isPlayerExpanded ? "Exit Fullscreen" : "Fullscreen Mode", 
           'fullscreen'
         );
         return;
@@ -492,7 +506,7 @@ export default function VideoPlayer({
           const nextSidebar = !showSidebar;
           setShowSidebar(nextSidebar);
           triggerOsd(
-            nextSidebar ? "চ্যানেল তালিকা চালু (Show Sidebar)" : "চ্যানেল তালিকা বন্ধ (Hide Sidebar)", 
+            nextSidebar ? "Show Sidebar" : "Hide Sidebar", 
             'sidebar'
           );
         }
@@ -504,7 +518,7 @@ export default function VideoPlayer({
           e.preventDefault();
           setIsWebFullscreen(false);
           setIsForcedLandscape(false);
-          triggerOsd("ফুলস্ক্রিন মড বন্ধ", 'fullscreen');
+          triggerOsd("Exit Fullscreen", 'fullscreen');
         }
       } else if (e.key === ' ' || e.key === 'Enter' || keyLower === 'k') {
         const activeTag = document.activeElement?.tagName;
@@ -513,52 +527,6 @@ export default function VideoPlayer({
         }
         e.preventDefault();
         togglePlay();
-      } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        if (!isTvMode) {
-          e.preventDefault();
-          if (e.key === 'ArrowUp') {
-            const newVal = Math.min(1.0, volume + 0.1);
-            setVolume(newVal);
-            if (videoRef.current) {
-              videoRef.current.volume = newVal;
-              if (isMuted && newVal > 0) {
-                videoRef.current.muted = false;
-                setIsMuted(false);
-              }
-            }
-            triggerOsd(`সাউন্ড লেভেল: ${Math.round(newVal * 100)}%`, 'volume', `${Math.round(newVal * 100)}%`);
-          } else if (e.key === 'ArrowDown') {
-            const newVal = Math.max(0.0, volume - 0.1);
-            setVolume(newVal);
-            if (videoRef.current) {
-              videoRef.current.volume = newVal;
-              if (newVal === 0) {
-                videoRef.current.muted = true;
-                setIsMuted(true);
-              }
-            }
-            triggerOsd(`সাউন্ড লেভেল: ${Math.round(newVal * 100)}%`, 'volume', `${Math.round(newVal * 100)}%`);
-          }
-        }
-      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
-        if (isTvMode) {
-          e.preventDefault();
-          if (e.key === 'ArrowLeft') {
-            if (videoRef.current) {
-              videoRef.current.muted = true;
-              setIsMuted(true);
-              userMutedRef.current = true;
-              triggerOsd("শব্দ বন্ধ (Muted)", 'mute');
-            }
-          } else if (e.key === 'ArrowRight') {
-            if (videoRef.current) {
-              videoRef.current.muted = false;
-              setIsMuted(false);
-              userMutedRef.current = false;
-              triggerOsd(`শব্দ চালু (Sound Unmuted)`, 'unmute', `${Math.round(volume * 100)}%`);
-            }
-          }
-        }
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -584,7 +552,7 @@ export default function VideoPlayer({
       }
       const nextVal = !isPlaying;
       setIsPlaying(nextVal);
-      triggerOsd(nextVal ? "ভিডিও প্লে করা হয়েছে (Play)" : "ভিডিও পজ করা হয়েছে (Pause)", nextVal ? 'play' : 'pause');
+      triggerOsd(nextVal ? "Play" : "Pause", nextVal ? 'play' : 'pause');
     }
   };
 
@@ -595,7 +563,7 @@ export default function VideoPlayer({
       setIsMuted(nextMuted);
       userMutedRef.current = nextMuted;
       triggerOsd(
-        nextMuted ? "শব্দ বন্ধ (Muted)" : `শব্দ চালু (Sound Unmuted)`, 
+        nextMuted ? "Muted" : `Sound Unmuted`, 
         nextMuted ? 'mute' : 'unmute', 
         nextMuted ? undefined : `${Math.round(volume * 100)}%`
       );
@@ -713,8 +681,8 @@ export default function VideoPlayer({
             <div className="w-16 h-16 bg-blue-600/10 border border-blue-500/20 rounded-2xl flex items-center justify-center text-blue-500 mb-4 animate-pulse">
               <Tv size={36} />
             </div>
-            <h3 className="text-xl font-bold tracking-tight mb-2">কোনো চ্যানেল নির্বাচন করা হয়নি</h3>
-            <p className="text-sm text-zinc-400">তালিকা থেকে অনুগ্রহ করে একটি চ্যানেল নির্বাচন করুন</p>
+            <h3 className="text-xl font-bold tracking-tight mb-2">No Channel Selected</h3>
+            <p className="text-sm text-zinc-400">Please select a channel from the list</p>
           </div>
         )}
 
@@ -781,7 +749,7 @@ export default function VideoPlayer({
                         referrerPolicy="no-referrer"
                       />
                       <div className="absolute bottom-16 left-1/2 transform -translate-x-1/2 bg-blue-600 hover:bg-blue-700 text-white font-sans text-xs sm:text-sm font-semibold px-4.5 py-2 rounded-full shadow-[0_4px_16px_rgba(0,0,0,0.6)] border border-blue-500/30 flex items-center gap-1.5 transition-all hover:scale-105 active:scale-95 animate-pulse">
-                        <span>বিজ্ঞাপনে যেতে এখানে ক্লিক করুন (Visit Website)</span>
+                        <span>Visit Website</span>
                       </div>
                     </a>
                   ) : (
@@ -839,7 +807,7 @@ export default function VideoPlayer({
                       className={`p-2 rounded-lg text-white transition-colors ${
                         showSidebar ? 'bg-blue-600 hover:bg-blue-700' : 'bg-white/10 hover:bg-white/20'
                       }`}
-                      title={showSidebar ? 'চ্যানেল লিস্ট লুকান' : 'চ্যানেল লিস্ট দেখান'}
+                      title={showSidebar ? 'Hide Channel List' : 'Show Channel List'}
                       id="fullscreen-sidebar-toggle-btn"
                     >
                       <List size={20} />
@@ -852,7 +820,7 @@ export default function VideoPlayer({
                       cycleAspectRatio();
                     }}
                     className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition-all flex items-center gap-1.5"
-                    title="স্ক্রিন ফিট / অ্যাসপেক্ট রেশিও পরিবর্তন (Aspect Ratio / Fit Mode - Press A)"
+                    title="Aspect Ratio / Fit Mode (Press A)"
                     id="aspect-ratio-btn"
                   >
                     <Crop size={18} className="text-amber-400" />
@@ -899,7 +867,7 @@ export default function VideoPlayer({
                           handleChannelDown();
                         }}
                         className="p-1.5 hover:bg-white/15 rounded-full text-white/80 hover:text-white transition-all flex items-center gap-1 text-xs"
-                        title="পূর্ববর্তী চ্যানেল (Keyboard Down)"
+                        title="Previous Channel (Keyboard Down)"
                         id="player-ch-down"
                       >
                         <ChevronDown size={18} />
@@ -912,7 +880,7 @@ export default function VideoPlayer({
                           handleChannelUp();
                         }}
                         className="p-1.5 hover:bg-white/15 rounded-full text-white/80 hover:text-white transition-all flex items-center gap-1 text-xs"
-                        title="পরবর্তী চ্যানেল (Keyboard Up)"
+                        title="Next Channel (Keyboard Up)"
                         id="player-ch-up"
                       >
                         <ChevronUp size={18} />
@@ -924,7 +892,7 @@ export default function VideoPlayer({
 
                 {isPlayerExpanded && (
                   <div className="text-xs text-white/50 bg-black/40 px-3 py-1.5 rounded-full backdrop-blur-sm border border-white/5">
-                    {isForcedLandscape ? 'ল্যান্ডস্কেপ ভিউ (Rotated)' : 'ফুলস্ক্রিন ভিউ (Fullscreen)'}
+                    {isForcedLandscape ? 'Rotated Landscape' : 'Fullscreen'}
                   </div>
                 )}
               </div>
@@ -983,7 +951,7 @@ export default function VideoPlayer({
             <div className="flex flex-col">
               <span className="text-white font-bold text-sm tracking-tight flex items-center gap-1.5">
                 <Tv size={16} className="text-blue-400" />
-                চ্যানেল তালিকা
+                Channel List
               </span>
               <span className="text-[10px] text-white/40 mt-0.5">Channel List ({channels.length})</span>
             </div>
@@ -1003,7 +971,7 @@ export default function VideoPlayer({
               type="text"
               value={searchInFullscreen}
               onChange={(e) => setSearchInFullscreen(e.target.value)}
-              placeholder="চ্যানেল খুঁজুন (Search)..."
+              placeholder="Search Channel..."
               className="w-full bg-white/5 hover:bg-white/10 focus:bg-white/10 text-white placeholder-white/30 rounded-xl text-xs pl-9 pr-4 py-2 border border-white/5 focus:border-blue-500/50 outline-none transition-all"
             />
           </div>
@@ -1051,7 +1019,7 @@ export default function VideoPlayer({
             })}
             {filteredChannels.length === 0 && (
               <div className="text-center py-8 text-white/40 text-xs">
-                কোনো চ্যানেল পাওয়া যায়নি
+                No channel found
               </div>
             )}
           </div>

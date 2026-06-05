@@ -13,4 +13,5 @@ export interface AppConfig {
   adType?: 'video' | 'image';
   adImageUrl?: string;
   adLinkUrl?: string;
+  apkUrl?: string;
 }

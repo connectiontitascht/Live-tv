@@ -16,20 +16,51 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
   const [isEditing, setIsEditing] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState<Partial<Channel>>({ name: '', url: '', logo: '', order: 0 });
-  const [configData, setConfigData] = useState<AppConfig>(config || { initialAdDuration: 10, hourlyAdInterval: 3600, adVideoUrl: '', adType: 'video', adImageUrl: '', adLinkUrl: '' });
+  const [configData, setConfigData] = useState<AppConfig>(config || { initialAdDuration: 10, hourlyAdInterval: 3600, adVideoUrl: '', adType: 'video', adImageUrl: '', adLinkUrl: '', apkUrl: '' });
   const [view, setView] = useState<'channels' | 'settings'>('channels');
   const [uploading, setUploading] = useState(false);
   const [adUploading, setAdUploading] = useState(false);
   const [adImageUploading, setAdImageUploading] = useState(false);
+  const [apkUploading, setApkUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [settingsSuccess, setSettingsSuccess] = useState<string | null>(null);
 
   useEffect(() => {
     if (config) {
-      setConfigData(config);
+      setConfigData((prev) => ({ ...prev, ...config }));
     }
   }, [config]);
+
+  const handleApkUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.name.endsWith('.apk')) {
+      setSettingsError("Please select a valid APK file (.apk).");
+      return;
+    }
+
+    setApkUploading(true);
+    setSettingsError(null);
+    setSettingsSuccess(null);
+    try {
+      const storageRef = ref(storage, `apks/${Date.now()}_${file.name}`);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+      setConfigData((prev) => ({ ...prev, apkUrl: url }));
+      setSettingsSuccess("APK file uploaded successfully!");
+    } catch (err: any) {
+      console.error("APK upload failed", err);
+      let errMsg = "APK upload failed. Please check your storage rules.";
+      if (err.message && (err.message.includes('permission-denied') || err.message.includes('Permission denied') || err.message.includes('insufficient permissions'))) {
+        errMsg = "You do not have permission to upload files. Please make sure you are logged in as an Admin.";
+      }
+      setSettingsError(errMsg);
+    } finally {
+      setApkUploading(false);
+    }
+  };
 
   const handleAdImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -386,6 +417,40 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
                 )}
               </div>
             )}
+
+            {/* APK Download Settings */}
+            <div className="pt-4 border-t border-white/5 space-y-4">
+              <h4 className="text-xs font-bold text-blue-400 uppercase tracking-widest">APK Download Settings</h4>
+              <div>
+                <label className="block text-sm text-white/40 mb-2">Android APK URL or Upload file (.apk)</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-2 text-sm text-white focus:ring-2 focus:ring-blue-500/50 outline-none transition-all font-mono"
+                    value={configData.apkUrl || ''}
+                    onChange={(e) => {
+                      setSettingsError(null);
+                      setSettingsSuccess(null);
+                      setConfigData({ ...configData, apkUrl: e.target.value });
+                    }}
+                    placeholder="https://... (APK URL or upload)"
+                  />
+                  <label className="bg-white/10 hover:bg-white/20 p-2.5 rounded-xl cursor-pointer transition-colors shrink-0 flex items-center justify-center border border-white/5" title="Upload APK File">
+                    <input type="file" className="hidden" accept=".apk" onChange={handleApkUpload} disabled={apkUploading} />
+                    {apkUploading ? <Loader2 size={18} className="animate-spin text-blue-400" /> : <Upload size={18} />}
+                  </label>
+                </div>
+                <p className="text-xs text-white/40 mt-1.5 leading-relaxed">
+                  Provide a direct APK download link or upload your compiled .apk file directly so that users can instantly download and run it on their devices.
+                </p>
+                {configData.apkUrl && (
+                  <div className="bg-white/5 border border-white/5 rounded-xl p-3.5 mt-3 space-y-1">
+                    <span className="text-xs text-white/40 block font-semibold text-emerald-400">✓ Active APK URL:</span>
+                    <span className="text-[11px] text-zinc-400 font-mono break-all block">{configData.apkUrl}</span>
+                  </div>
+                )}
+              </div>
+            </div>
 
             <button
               onClick={handleSaveConfig}
