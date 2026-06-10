@@ -28,3 +28,28 @@
     @apply outline-none ring-2 ring-blue-500 ring-offset-2 ring-offset-black;
   }
 }
+
+/* Force landscape view inside native browser fullscreen on mobile devices */
+#video-container[data-force-landscape="true"]:fullscreen {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: 100vh !important;
+  height: 100vw !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform: translate(-50%, -50%) rotate(90deg) !important;
+  border-radius: 0 !important;
+}
+
+#video-container[data-force-landscape="true"]:-webkit-full-screen {
+  position: fixed !important;
+  top: 50% !important;
+  left: 50% !important;
+  width: 100vh !important;
+  height: 100vw !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform: translate(-50%, -50%) rotate(90deg) !important;
+  border-radius: 0 !important;
+}

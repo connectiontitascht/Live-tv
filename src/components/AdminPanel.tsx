@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db, storage, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, deleteDoc, doc, setDoc, onSnapshot } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Channel, AppConfig } from '../types';
 import { Plus, Trash2, Edit2, X, Save, Settings, Tv, Upload, Loader2, ShieldAlert } from 'lucide-react';
@@ -17,8 +17,19 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
   const [showAddForm, setShowAddForm] = useState(false);
   const [formData, setFormData] = useState<Partial<Channel>>({ name: '', url: '', logo: '', order: 0 });
   const [configData, setConfigData] = useState<AppConfig>(config || { initialAdDuration: 10, hourlyAdInterval: 3600, adVideoUrl: '', adType: 'video', adImageUrl: '', adLinkUrl: '', apkUrl: '' });
-  const [view, setView] = useState<'channels' | 'settings'>('channels');
+  const [view, setView] = useState<'channels' | 'settings' | 'visitors'>('channels');
+  const [visitors, setVisitors] = useState<any[]>([]);
   const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'presence'), (snap) => {
+      const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const sorted = list.sort((a: any, b: any) => (b.lastActive || 0) - (a.lastActive || 0));
+      setVisitors(sorted);
+    }, (err) => console.error("Presence snapshot error", err));
+
+    return () => unsub();
+  }, []);
   const [adUploading, setAdUploading] = useState(false);
   const [adImageUploading, setAdImageUploading] = useState(false);
   const [apkUploading, setApkUploading] = useState(false);
@@ -225,16 +236,23 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
           <Settings className="text-blue-500" />
           Admin Panel
         </h2>
-        <div className="flex bg-white/5 rounded-lg p-1">
+        <div className="flex bg-white/5 rounded-lg p-1 gap-1">
           <button 
             onClick={() => setView('channels')}
-            className={`px-4 py-2 rounded-md transition-all ${view === 'channels' ? 'bg-blue-600' : 'hover:bg-white/5'}`}
+            className={`px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm rounded-md transition-all ${view === 'channels' ? 'bg-blue-600' : 'hover:bg-white/5'}`}
           >
             Channels
           </button>
           <button 
+            onClick={() => setView('visitors')}
+            className={`px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm rounded-md transition-all flex items-center gap-1.5 ${view === 'visitors' ? 'bg-emerald-600' : 'hover:bg-white/5'}`}
+          >
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            Live Viewers ({visitors.filter(v => Date.now() - (v.lastActive || 0) < 45000).length})
+          </button>
+          <button 
             onClick={() => setView('settings')}
-            className={`px-4 py-2 rounded-md transition-all ${view === 'settings' ? 'bg-blue-600' : 'hover:bg-white/5'}`}
+            className={`px-3 py-1.5 sm:px-4 sm:py-2 text-xs sm:text-sm rounded-md transition-all ${view === 'settings' ? 'bg-blue-600' : 'hover:bg-white/5'}`}
           >
             Settings
           </button>
@@ -273,6 +291,47 @@ export default function AdminPanel({ channels, config, onRefresh }: AdminPanelPr
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      ) : view === 'visitors' ? (
+        <div className="space-y-6">
+          <div className="flex justify-between items-center border-b border-white/5 pb-3">
+            <h3 className="text-lg font-medium opacity-65">Live Viewers List</h3>
+            <span className="px-3 py-1 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-xs font-bold rounded-full animate-pulse flex items-center gap-1.5 shadow-sm">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+              {visitors.filter(v => Date.now() - (v.lastActive || 0) < 45000).length}
+            </span>
+          </div>
+
+          <div className="grid gap-3">
+            {visitors.length === 0 ? (
+              <p className="text-zinc-500 text-sm py-4 text-center select-none">No live viewers found.</p>
+            ) : (
+              visitors.map((visitor) => {
+                const isActive = Date.now() - (visitor.lastActive || 0) < 45000;
+                return (
+                  <div key={visitor.id} className="flex items-center justify-between p-4 bg-white/5 border border-white/5 hover:border-white/10 rounded-2xl transition-all duration-300">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className={`w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-emerald-500 shadow-[0_0_8px_#10B981]' : 'bg-zinc-600'}`} />
+                      <div className="min-w-0">
+                        <div className="font-mono text-[11px] text-zinc-400 truncate">Visitor ID: {visitor.id}</div>
+                        <div className="text-xs text-white/50 mt-1 truncate">
+                          Current Channel: <span className="text-blue-400 font-semibold">{visitor.viewingChannel || 'Home Page'}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right flex flex-col items-end shrink-0 pl-3">
+                      <span className={`text-[10px] font-extrabold tracking-wide uppercase px-2 py-0.5 rounded-md ${isActive ? 'bg-emerald-500/15 text-emerald-400' : 'bg-white/5 text-zinc-500'}`}>
+                        {isActive ? 'Active' : 'Offline'}
+                      </span>
+                      <span className="text-[10px] font-mono text-zinc-500 mt-1">
+                        {visitor.lastActive ? new Date(visitor.lastActive).toLocaleTimeString() : 'N/A'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       ) : (

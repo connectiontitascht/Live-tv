@@ -197,6 +197,9 @@ export default function VideoPlayer({
 
   useEffect(() => {
     onFullscreenChange?.(isPlayerExpanded);
+    if (isPlayerExpanded) {
+      setShowSidebar(true);
+    }
   }, [isPlayerExpanded, onFullscreenChange]);
 
   const userMutedRef = useRef(false);
@@ -652,6 +655,7 @@ export default function VideoPlayer({
       onClick={handleMouseMove}
       onTouchStart={handleMouseMove}
       id="video-container"
+      data-force-landscape={shouldForceLandscapeRotate ? "true" : "false"}
     >
       {/* LEFT SECTION: Video & controls */}
       <div className="flex-1 h-full relative bg-black flex items-center justify-center">
@@ -942,7 +946,7 @@ export default function VideoPlayer({
       {/* RIGHT SECTION / SIDEBAR: Fullscreen Channel list */}
       {isPlayerExpanded && showSidebar && channels && channels.length > 0 && (
         <div 
-          className="w-72 sm:w-80 h-full border-l border-white/10 bg-zinc-950/95 backdrop-blur-md flex flex-col z-[45] shrink-0 relative" 
+          className="w-60 sm:w-72 md:w-80 h-full border-l border-white/10 bg-zinc-950/95 backdrop-blur-md flex flex-col z-[45] shrink-0 relative" 
           onClick={(e) => e.stopPropagation()}
           id="fullscreen-channel-sidebar"
         >

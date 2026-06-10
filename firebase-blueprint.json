@@ -54,6 +54,22 @@
         }
       },
       "required": ["email"]
+    },
+    "presence": {
+      "title": "Presence",
+      "description": "Active visitor session for real-time occupancy counting",
+      "type": "object",
+      "properties": {
+        "lastActive": {
+          "type": "number",
+          "description": "Epoch timestamp when the user was last active"
+        },
+        "viewingChannel": {
+          "type": "string",
+          "description": "Optional name of the channel the user is currently viewing"
+        }
+      },
+      "required": ["lastActive"]
     }
   },
   "firestore": {
@@ -68,6 +84,10 @@
     "/admins/{userId}": {
       "schema": "admin",
       "description": "Collection of admin users by their UID"
+    },
+    "/presence/{presenceId}": {
+      "schema": "presence",
+      "description": "Session tracking for online visitors count"
     }
   }
 }

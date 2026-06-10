@@ -26,6 +26,10 @@ service cloud.firestore {
       return id is string && id.size() <= 128;
     }
 
+    function isNumeric(val) {
+      return val is int || val is float;
+    }
+
     // Channels
     match /channels/{channelId} {
       allow read: if true; // Everyone can read channels
@@ -37,7 +41,7 @@ service cloud.firestore {
       return data.keys().hasAll(['name', 'url', 'order'])
         && data.name is string && data.name.size() > 0 && data.name.size() <= 100
         && data.url is string && data.url.size() > 0 && data.url.size() <= 500
-        && data.order is number
+        && isNumeric(data.order)
         && (!('logo' in data) || (data.logo is string && data.logo.size() <= 500));
     }
 
@@ -45,6 +49,19 @@ service cloud.firestore {
     match /configs/{configId} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+
+    // Presence
+    match /presence/{presenceId} {
+      allow read: if true;
+      allow create, update: if isValidId(presenceId) && isValidPresence(request.resource.data);
+      allow delete: if isValidId(presenceId);
+    }
+
+    function isValidPresence(data) {
+      return data.keys().hasAll(['lastActive'])
+        && isNumeric(data.lastActive)
+        && (!('viewingChannel' in data) || (data.viewingChannel is string && data.viewingChannel.size() <= 100));
     }
   }
 }
